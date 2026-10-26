@@ -257,9 +257,9 @@ def verify_dataset_structure():
     lr_dataset_l1c_aois = set(Path(aoi).parent.name for aoi in glob('dataset/lr_dataset/*/L1C'))
     lr_dataset_l2a_aois = set(Path(aoi).parent.name for aoi in glob('dataset/lr_dataset/*/L2A'))
 
-    assert expected_aois.intersection(hr_dataset_aois) == expected_aois, f'hr_dataset is missing AOIs, please redownload it.'
-    assert expected_aois.intersection(lr_dataset_l1c_aois) == expected_aois, f'lr_dataset (L1C) is missing AOIs, please redownload it.'
-    assert expected_aois.intersection(lr_dataset_l2a_aois) == expected_aois, f'lr_dataset (L2A) is missing AOIs, please redownload it.'
+    assert expected_aois.intersection(hr_dataset_aois) == expected_aois, 'hr_dataset is missing AOIs, please redownload it.'
+    assert expected_aois.intersection(lr_dataset_l1c_aois) == expected_aois, 'lr_dataset (L1C) is missing AOIs, please redownload it.'
+    assert expected_aois.intersection(lr_dataset_l2a_aois) == expected_aois, 'lr_dataset (L2A) is missing AOIs, please redownload it.'
 
-    print(f"Dataset structure looks good. ✅")
+    print("Dataset structure looks good. ✅")
 

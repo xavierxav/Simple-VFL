@@ -10,12 +10,12 @@ from omegaconf import ListConfig
 def set_seed(seed=0):
     """
     Set the seed for reproducibility across various libraries.
-    
+
     Parameters:
     seed (int): The seed value to use for random number generation.
     """
     random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)

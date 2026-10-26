@@ -72,9 +72,9 @@ line-length = 120
 exclude = ["worldstrat_downloading_and_features_extraction"]
 
 [tool.ruff.lint]
-# High-signal rules only (syntax errors + pyflakes), to catch undefined names
-# without reformatting the legacy codebase.
-select = ["E9", "F"]
+# pycodestyle, pyflakes, import sorting, pyupgrade and bugbear.
+# The legacy `worldstrat_...` scripts are excluded from linting (see above).
+select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
