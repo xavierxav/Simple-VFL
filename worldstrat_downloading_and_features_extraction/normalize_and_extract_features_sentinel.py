@@ -109,7 +109,7 @@ def extract_class_tokens(data_root, output_dir, batch_size, channels_list, input
     output_dir = os.path.normpath(os.path.join(data_root, output_dir))
     os.makedirs(output_dir, exist_ok=True)
 
-    logger.info(f"Loading model: facebook/dinov2-giant")
+    logger.info("Loading model: facebook/dinov2-giant")
     model = AutoModel.from_pretrained('facebook/dinov2-giant').to(device)
     model.eval()
 

@@ -1,12 +1,26 @@
 # Simple-VFL
 
 [![CI](https://github.com/xavierxav/Simple-VFL/actions/workflows/ci.yml/badge.svg)](https://github.com/xavierxav/Simple-VFL/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.10-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A compact PyTorch implementation of **Vertical Federated Learning (VFL)**. Each party holds a different view of the same samples, trains a local encoder, and only the resulting embeddings are shared with a global head. The repository covers several SplitNN variants, satellite and tabular datasets, DINOv2 feature extraction, Hydra configuration, TensorBoard logging, early stopping, tests, and CI.
 
-The code is adapted and simplified from [VFLAIR](https://github.com/FLAIR-THU/VFLAIR); see [ATTRIBUTION.md](ATTRIBUTION.md).
+The code is adapted and simplified from [VFLAIR](https://github.com/FLAIR-THU/VFLAIR).
+
+## What is original here
+
+The SplitNN training skeleton follows VFLAIR (see [ATTRIBUTION.md](ATTRIBUTION.md)). The parts
+specific to this repository are:
+
+- a DINOv2 ViT-g/14 feature pipeline for WorldStrat (SPOT + Sentinel L2A) and VertiBench, with the
+  extracted features published on [Hugging Face](https://huggingface.co/datasets/xavvierxav/L1C_dataset);
+- a comparison protocol across vertical, horizontal, isolated-party and late-aggregation settings,
+  on identical POI-grouped splits, with per-class metrics;
+- the Hydra layer: one config tree, multi-seed sweeps, readable output folders, early stopping and
+  TensorBoard logging;
+- a deliberately small core (~1,200 lines) that keeps the SplitNN semantics and drops VFLAIR's
+  communication, attack and defence stack, plus tests, CI and a `pip install` package.
 
 ## Highlights
 
@@ -15,7 +29,8 @@ The code is adapted and simplified from [VFLAIR](https://github.com/FLAIR-THU/VF
 - Credit-card tabular data and WorldStrat/SPOT/Sentinel/VertiBench satellite data.
 - DINOv2 feature extraction scripts for satellite imagery.
 - Hydra configs, multi-run sweeps, TensorBoard logs, and early stopping.
-- Smoke test on a synthetic dataset plus unit tests, linted and run in CI.
+- Smoke test on a synthetic dataset plus unit tests, linted (`ruff check`, `ruff format --check`) and
+  run in CI on Python 3.10 to 3.12.
 
 ## Results
 
@@ -75,7 +90,7 @@ The local encoders are trained end-to-end through the global head. In the aggreg
 
 ## Installation
 
-Python 3.10 is recommended.
+Python 3.10 or newer is recommended (CI runs 3.10, 3.11 and 3.12).
 
 ### Option A — pip
 
@@ -125,7 +140,13 @@ DATA_ROOT/
 
 - **Credit**: [UCI Credit Card Default](https://archive.ics.uci.edu/dataset/350/default+of+credit+card+clients).
 - **WorldStrat**: Sentinel L2A and SPOT images are downloaded with the notebook and scripts in [`worldstrat_downloading_and_features_extraction/`](worldstrat_downloading_and_features_extraction/).
-- **VertiBench**: the satellite dataset from [VertiBench](https://vertibench.xtra.science/datasets/1/). A reshaped `.npy` version is available on [Hugging Face](https://huggingface.co/datasets/xavvierxav/L1C_dataset).
+- **VertiBench**: the satellite dataset from [VertiBench](https://vertibench.xtra.science/datasets/1/).
+
+The pre-extracted DINOv2 features and the reshaped VertiBench arrays are published on
+[Hugging Face](https://huggingface.co/datasets/xavvierxav/L1C_dataset) (~8.6 GB):
+`extracted_features_giant_rgb_light_preprocess.zip` (Sentinel L2A),
+`extracted_features_giant_ps_normalized.7z` (SPOT) and `Vertibench.7z`.
+Unpack them under `$DATA_ROOT/satellite_dataset/`, keeping the folder names used by the configs.
 
 The smoke test generates a synthetic credit-card CSV, so it does not need the real dataset.
 
@@ -191,7 +212,7 @@ ruff check simple_vfl tests scripts
 pytest -q
 ```
 
-The test suite includes a full one-epoch smoke test on a synthetic credit-card dataset, plus unit tests for dataset feature handling, aggregation models, and optional configuration handling (including a device-placement check for class weights). GitHub Actions runs lint and tests on every push and pull request.
+The test suite includes a full one-epoch smoke test on a synthetic credit-card dataset, plus unit tests for dataset feature handling, aggregation models, and optional configuration handling (including a device-placement check for class weights). GitHub Actions runs `ruff check`, `ruff format --check` and `pytest` on every push and pull request, on Python 3.10, 3.11 and 3.12.
 
 ## Results analysis
 
@@ -205,7 +226,7 @@ python scripts/aggregate_results.py outputs/multirun/CreditDataset
 
 - Seeds are fixed through `runtime.seed`; the data splits are grouped by POI, so a POI cannot appear in both train and test.
 - The original feature-extraction scripts computed image normalisation statistics over the full dataset. For a strict protocol, recompute them on the training split only.
-- The reported scores come from the original 2024 logs and are not a fresh benchmark.
+- The reported satellite scores come from the original 2024 logs and are not a fresh benchmark. The public code was simplified afterwards (the aggregation models now average the party logits instead of summing them, for example), so re-running it on the published features gives close but not identical numbers.
 - This is research/teaching code, not a production federated-learning system. It simulates parties in a single process; it does not provide secure aggregation, differential privacy, or communication encryption.
 
 ## License and attribution

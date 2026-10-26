@@ -1,19 +1,36 @@
 import numpy as np
 import pandas as pd
 import torch
-
 from addict import Dict
 
-from simple_vfl.main_task_vfl import MainTaskVFL
 from simple_vfl.dataset.datasets import SatelliteDataset
+from simple_vfl.main_task_vfl import MainTaskVFL
 from simple_vfl.models.complete_model import AggregationModel, SPOTandSentinelAggregationModel
 
-
 FEATURE_COLUMNS = [
-    "LIMIT_BAL", "SEX", "EDUCATION", "MARRIAGE", "AGE",
-    "PAY_0", "PAY_2", "PAY_3", "PAY_4", "PAY_5", "PAY_6",
-    "BILL_AMT1", "BILL_AMT2", "BILL_AMT3", "BILL_AMT4", "BILL_AMT5", "BILL_AMT6",
-    "PAY_AMT1", "PAY_AMT2", "PAY_AMT3", "PAY_AMT4", "PAY_AMT5", "PAY_AMT6",
+    "LIMIT_BAL",
+    "SEX",
+    "EDUCATION",
+    "MARRIAGE",
+    "AGE",
+    "PAY_0",
+    "PAY_2",
+    "PAY_3",
+    "PAY_4",
+    "PAY_5",
+    "PAY_6",
+    "BILL_AMT1",
+    "BILL_AMT2",
+    "BILL_AMT3",
+    "BILL_AMT4",
+    "BILL_AMT5",
+    "BILL_AMT6",
+    "PAY_AMT1",
+    "PAY_AMT2",
+    "PAY_AMT3",
+    "PAY_AMT4",
+    "PAY_AMT5",
+    "PAY_AMT6",
 ]
 
 
@@ -28,17 +45,19 @@ def _write_credit_csv(root, n=100, seed=0):
 
 
 def _credit_config(data_root):
-    return Dict({
-        "k": 2,
-        "epochs": 1,
-        "lr": 1e-3,
-        "batch_size": 16,
-        "hidden_dim": 8,
-        "model": "CreditModel",
-        "runtime": {"device": "cpu", "gpu": 0, "seed": 0, "save_model": False, "num_workers": 0},
-        "dataset": {"dataset_name": "CreditDataset", "num_classes": 2, "data_root": str(data_root)},
-        "early_stopping": {"patience": 2, "delta": 0.0},
-    })
+    return Dict(
+        {
+            "k": 2,
+            "epochs": 1,
+            "lr": 1e-3,
+            "batch_size": 16,
+            "hidden_dim": 8,
+            "model": "CreditModel",
+            "runtime": {"device": "cpu", "gpu": 0, "seed": 0, "save_model": False, "num_workers": 0},
+            "dataset": {"dataset_name": "CreditDataset", "num_classes": 2, "data_root": str(data_root)},
+            "early_stopping": {"patience": 2, "delta": 0.0},
+        }
+    )
 
 
 def test_credit_smoke(tmp_path, monkeypatch):

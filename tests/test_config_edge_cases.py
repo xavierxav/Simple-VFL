@@ -2,7 +2,6 @@
 
 import torch
 import torch.nn as nn
-
 from addict import Dict
 
 from simple_vfl.main_task_vfl import MainTaskVFL

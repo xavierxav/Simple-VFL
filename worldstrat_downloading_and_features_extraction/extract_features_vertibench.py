@@ -12,10 +12,7 @@ mean and std values per channel were calculated using the script Satellite_mean_
 import argparse
 import logging
 import os
-import traceback
 from logging.handlers import RotatingFileHandler
-
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torchvision import transforms
@@ -111,7 +108,7 @@ def extract_class_tokens(data_root, input_dir='Vertibench', output_dir='extracte
     output_dir = os.path.normpath(os.path.join(data_root, output_dir))
     os.makedirs(output_dir, exist_ok=True)
 
-    logger.info(f"Loading model: facebook/dinov2-giant")
+    logger.info("Loading model: facebook/dinov2-giant")
     model = AutoModel.from_pretrained('facebook/dinov2-giant').to(device)
     model.eval()
 
