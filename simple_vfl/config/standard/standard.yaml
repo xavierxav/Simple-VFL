@@ -1,0 +1,29 @@
+# @package _global_
+
+hydra:
+  job:
+    chdir: True
+
+early_stopping:
+  patience: 10
+  delta: 0.0
+
+scheduler:
+  type: ReduceLROnPlateau
+  factor: 0.3
+  patience: 4
+
+runtime:
+  device: auto
+  gpu: 0
+  seed: 0
+  save_model: False
+  num_workers: 4
+
+dataset:
+  data_root: ${oc.env:DATA_ROOT}
+
+epochs: 10
+lr: 0.001
+batch_size: 512
+k: 2

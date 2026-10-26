@@ -1,0 +1,88 @@
+"""
+Load and preprocess datasets based on the specified configuration.
+
+This function loads different datasets and prepares them for training, validation, and testing
+depending on the dataset name provided in the configuration arguments. It supports multiple
+datasets (from Datasets.py file) and performs necessary preprocessing steps, 
+such as scaling features or mapping labels.
+
+Key steps:
+- Selects the appropriate dataset class based on the dataset name.
+- Reads data from CSV files or other data sources.
+- Splits the data into training, validation, and test sets, ensuring stratification if needed.
+- Applies data preprocessing, such as feature scaling or label mapping.
+- Returns the datasets as instances of PyTorch's Dataset or Subset, ready for use with DataLoader.
+"""
+
+
+import os
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from . import datasets as Datasets
+from torch.utils.data import Subset
+import logging
+from ..utils.labels import LabelMappings
+
+# Use the same logger as in the main file
+logger = logging.getLogger(__name__)
+
+def load_datasets(args):
+    logger.info('load_datasets')
+
+    # most important line in this function
+    # the correct dataset class is selected based on the dataset name provided in the config file
+    dataset_class = getattr(Datasets, args.dataset.dataset_name)
+
+    if 'credit' in args.dataset.dataset_name.lower():
+        csv_file = os.path.join(args.dataset.data_root, "tabledata" , "UCI_Credit_Card.csv")
+        df = pd.read_csv( csv_file )
+        logger.info("credit dataset loaded")
+
+        X = df[["LIMIT_BAL", "SEX", "EDUCATION", "MARRIAGE", "AGE", "PAY_0", "PAY_2", "PAY_3", "PAY_4", "PAY_5", "PAY_6", "BILL_AMT1", "BILL_AMT2", "BILL_AMT3", "BILL_AMT4", "BILL_AMT5", "BILL_AMT6", "PAY_AMT1", "PAY_AMT2", "PAY_AMT3", "PAY_AMT4", "PAY_AMT5", "PAY_AMT6"]].values
+        y = df["default.payment.next.month"].values
+        train_val, test= train_test_split(range(len(y)), test_size=0.2, random_state=42, stratify=y)
+        train, val = train_test_split(train_val, test_size=0.25, random_state=args.runtime.seed, stratify=y[train_val])
+
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X[train])
+        X_val = scaler.transform(X[val])
+        X_test = scaler.transform(X[test])
+
+        train_data = dataset_class(data = X_train, labels = y[train])
+        val_data = dataset_class(data = X_val, labels = y[val])
+        test_data = dataset_class(data = X_test, labels = y[test])
+
+        return train_data, val_data, test_data
+
+    elif 'sentinel' in args.dataset.dataset_name.lower() or 'spot' in args.dataset.dataset_name.lower():
+        # Common loading and preprocessing steps
+        csv_file = os.path.join(args.dataset.data_root, 'satellite_dataset', 'metadata.csv')
+        df = pd.read_csv(os.path.normpath(csv_file), sep=';')
+        df = df.rename(columns={df.columns[0]: 'POI'})
+        df = df.loc[~df['POI'].isin(['ASMSpotter-1-1-1', 'Landcover-1062091', 'UNHCR-HUNs002665'])]
+
+        metadata = df[['POI', 'IPCC Class']].drop_duplicates().reset_index(drop=True)
+        
+        label_mappings = LabelMappings(args.dataset.label_type)
+        metadata['label'] = metadata.apply(lambda row: label_mappings.get_label(row['POI'].split('-')[0] if args.dataset.label_type == 'sources' else row['IPCC Class']), axis=1)
+        
+        # Split data
+        train_val_pois, test_pois = train_test_split(range(len(metadata)), test_size=0.15, random_state=42, stratify=metadata['label'])
+        train_pois, val_pois = train_test_split(train_val_pois, test_size=0.2, random_state=args.runtime.seed, stratify=metadata.iloc[train_val_pois]['label'])
+
+        dataset = dataset_class(dataset_dict=args.dataset, metadata=metadata, k=args.k)
+
+        return Subset(dataset, train_pois), Subset(dataset, val_pois), Subset(dataset, test_pois)
+
+    elif 'vertibench' in args.dataset.dataset_name.lower():
+        test_dataset = dataset_class(args, split='test')
+        train_val_dataset = dataset_class(args, split='train')
+
+        data_path = os.path.join(args.dataset.data_root, 'satellite_dataset', args.dataset.features_instead if 'features_instead' in args.dataset else 'Vertibench')
+        train_val_labels = np.load(os.path.join(data_path, 'label_train.npy'))
+        train_indices, val_indices = train_test_split(range(len(train_val_labels)), test_size=0.15, random_state=args.runtime.seed, stratify=train_val_labels)
+        
+        return Subset(train_val_dataset, train_indices), Subset(train_val_dataset, val_indices), test_dataset
+

@@ -1,0 +1,21 @@
+version: 1
+formatters:
+  simple:
+    format: '%(asctime)s [%(levelname)s] - %(message)s'
+    datefmt: '%H:%M:%S'
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: simple
+    stream: ext://sys.stdout
+    level: INFO
+  file:
+    class: logging.FileHandler
+    formatter: simple
+    filename: 'main_pipeline.log'
+    level: DEBUG
+root:
+  handlers: [console, file]
+  level: DEBUG
+
+disable_existing_loggers: false

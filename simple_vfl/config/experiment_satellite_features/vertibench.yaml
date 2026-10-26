@@ -1,0 +1,16 @@
+# @package _global_
+
+epochs: 50
+k: 16
+lr: 1e-3
+batch_size: 512
+hidden_dim: 1000
+
+
+dataset:
+  dataset_name: 'VertibenchData'
+  features_instead : 'extracted_features_giant_rgb_Vertibench'
+
+model: 'SatelliteFeaturesCentralized2layers'
+
+
