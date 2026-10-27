@@ -181,6 +181,20 @@ class HorizontalSPOTAndSentinelDataset(SatelliteDataset):
         return [image], label
 
 
+class HorizontalSPOTAndOneSentinelDataset(SatelliteDataset):
+    """Return the SPOT view plus one random Sentinel view per POI.
+
+    Horizontal proxy with the same two sensors as the 17-view vertical model,
+    but only one Sentinel revisit instead of sixteen.
+    """
+
+    def __getitem__(self, idx):
+        poi = self.metadata.iloc[idx]["POI"]
+        label = self.metadata.iloc[idx]["label"]
+        n = random.randint(1, 16)
+        return [self.get_spot_image(poi), self.get_sentinel_image(poi, n)], label
+
+
 class VertibenchData(Dataset):
     """
     VertibenchData is the base class for all vertibench datasets

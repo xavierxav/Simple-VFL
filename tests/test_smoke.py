@@ -3,9 +3,15 @@ import pandas as pd
 import torch
 from addict import Dict
 
-from simple_vfl.dataset.datasets import SatelliteDataset
+from simple_vfl.dataset.datasets import HorizontalSPOTAndOneSentinelDataset, SatelliteDataset
 from simple_vfl.main_task_vfl import MainTaskVFL
-from simple_vfl.models.complete_model import AggregationModel, SPOTandSentinelAggregationModel
+from simple_vfl.models.complete_model import (
+    AggregationModel,
+    SpecialModel,
+    SPOTandSentinelAggregationModel,
+    SPOTandSentinelMeanEmbeddingModel,
+    SPOTandSentinelSharedConcatModel,
+)
 
 FEATURE_COLUMNS = [
     "LIMIT_BAL",
@@ -109,3 +115,37 @@ def test_spot_and_sentinel_aggregation_shapes():
     bottom_outputs, final_output = model(features)
     assert len(bottom_outputs) == 17
     assert final_output.shape == (4, 2)
+
+
+def test_horizontal_spot_and_one_sentinel_returns_two_views():
+    """The SPOT + 1 Sentinel proxy returns exactly the two sensor views."""
+    dataset = HorizontalSPOTAndOneSentinelDataset(
+        Dict({"data_root": "/tmp", "dataset_name": "HorizontalSPOTAndOneSentinelDataset"}),
+        metadata=pd.DataFrame({"POI": ["A"], "label": [0]}),
+        k=2,
+    )
+    dataset.get_spot_image = lambda poi: torch.zeros(1536)
+    dataset.get_sentinel_image = lambda poi, n: torch.ones(1536)
+    images, label = dataset[0]
+    assert len(images) == 2
+    assert images[0].shape == (1536,)
+    assert label == 0
+
+
+def test_special_model_handles_seventeen_views():
+    """The shared-encoder model concatenates one hidden vector per view."""
+    config = Dict({"k": 17, "lr": 1e-3, "hidden_dim": 8, "dataset": {"num_classes": 4}})
+    model = SpecialModel(config)
+    features = [torch.randn(4, 1536) for _ in range(17)]
+    bottom_outputs, final_output = model(features)
+    assert len(bottom_outputs) == 17
+    assert final_output.shape == (4, 4)
+
+
+def test_spot_and_sentinel_fusion_variants():
+    """Mean-embedding and shared-concat fusion both return four logits per sample."""
+    config = Dict({"k": 17, "lr": 1e-3, "hidden_dim": 8, "dataset": {"num_classes": 4}})
+    features = [torch.randn(4, 1536) for _ in range(17)]
+    for model_class in (SPOTandSentinelMeanEmbeddingModel, SPOTandSentinelSharedConcatModel):
+        _, final_output = model_class(config)(features)
+        assert final_output.shape == (4, 4)

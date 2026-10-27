@@ -256,6 +256,71 @@ class SPOTandSentinelAggregationModel(CompleteModel):
         return bottom_outputs, final_output
 
 
+class SPOTandSentinelMeanEmbeddingModel(CompleteModel):
+    """Two-party fusion: SPOT embedding plus the mean Sentinel embedding.
+
+    The Sentinel party applies one shared encoder to its revisits and averages
+    the resulting embeddings before sending a single vector to the coordinator.
+    This keeps the coordinator input at ``2 * hidden_dim`` instead of
+    ``k * hidden_dim``, which matters when the number of training POIs is small.
+    """
+
+    def __init__(self, args):
+        self.k = args.k
+        self.hidden_dim = args.hidden_dim
+        spot_encoder = nn.Sequential(
+            nn.Linear(1536, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.ReLU(),
+        )
+        sentinel_encoder = nn.Sequential(
+            nn.Linear(1536, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.ReLU(),
+        )
+        head = nn.Linear(2 * self.hidden_dim, args.dataset.num_classes)
+        super().__init__(models=[spot_encoder, sentinel_encoder, head], args=args)
+
+    def forward(self, x):
+        spot_embedding = self.models[0](x[0])
+        sentinel_embeddings = torch.stack([self.models[1](view) for view in x[1:]], dim=0)
+        sentinel_embedding = sentinel_embeddings.mean(dim=0)
+        final_output = self.models[2](torch.cat([spot_embedding, sentinel_embedding], dim=1))
+        return [spot_embedding, sentinel_embedding], final_output
+
+
+class SPOTandSentinelSharedConcatModel(CompleteModel):
+    """Separate SPOT encoder, one shared encoder for the Sentinel revisits.
+
+    Each Sentinel view produces a hidden vector with the same encoder, and the
+    coordinator concatenates the SPOT vector with all Sentinel vectors. This is
+    the shared-weight variant described in the experiment notes: one Sentinel
+    model, one SPOT model, then a linear head over the concatenation.
+    """
+
+    def __init__(self, args):
+        self.k = args.k
+        self.hidden_dim = args.hidden_dim
+        spot_encoder = nn.Sequential(
+            nn.Linear(1536, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.ReLU(),
+        )
+        sentinel_encoder = nn.Sequential(
+            nn.Linear(1536, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.ReLU(),
+        )
+        head = nn.Linear(self.hidden_dim * args.k, args.dataset.num_classes)
+        super().__init__(models=[spot_encoder, sentinel_encoder, head], args=args)
+
+    def forward(self, x):
+        spot_embedding = self.models[0](x[0])
+        sentinel_embeddings = [self.models[1](view) for view in x[1:]]
+        final_output = self.models[2](torch.cat([spot_embedding, *sentinel_embeddings], dim=1))
+        return [spot_embedding, *sentinel_embeddings], final_output
+
+
 class VertibenchReproduction(CompleteModel):
     """ResNet-18 per party on raw VertiBench patches, then an MLP over the concatenation."""
 

@@ -87,7 +87,9 @@ def load_datasets(args):
     elif "sentinel" in args.dataset.dataset_name.lower() or "spot" in args.dataset.dataset_name.lower():
         # Common loading and preprocessing steps
         csv_file = os.path.join(args.dataset.data_root, "satellite_dataset", "metadata.csv")
-        df = pd.read_csv(os.path.normpath(csv_file), sep=";")
+        # The public WorldStrat metadata.csv (Zenodo) is comma-separated, while
+        # some local exports use semicolons. Sniff the delimiter so both load.
+        df = pd.read_csv(os.path.normpath(csv_file), sep=None, engine="python")
         df = df.rename(columns={df.columns[0]: "POI"})
         df = df.loc[~df["POI"].isin(["ASMSpotter-1-1-1", "Landcover-1062091", "UNHCR-HUNs002665"])]
 

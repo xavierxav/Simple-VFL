@@ -1,10 +1,14 @@
 # @package _global_
 
+# Final two-sensor model: one SPOT encoder, one encoder shared by the 16
+# Sentinel revisits, then a weighted sum of the logits. `sentinel_weight=0.5`
+# was selected on seed 0 and confirmed on seeds 1-4 (see RESULTS.md).
 epochs: 50
 k: 17
 lr: 1e-3
 batch_size: 512
 hidden_dim: 1000
+sentinel_weight: 0.5
 
 weight_decay: 0
 
@@ -16,4 +20,3 @@ dataset:
   spot_features_instead: 'extracted_features_giant_ps_normalized'
 
 model: 'SPOTandSentinelAggregationModel'
-
