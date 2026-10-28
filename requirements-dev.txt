@@ -1,0 +1,2 @@
+# Development dependencies (package + pytest + ruff).
+-e ".[dev]"

@@ -1,0 +1,19 @@
+# @package _global_
+
+# Capacity-controlled vertical baseline.
+# Same data and same 16-party protocol as `sentinel.yaml`, but each party has
+# its own 1536 -> hidden -> num_classes encoder and the logits are averaged,
+# instead of concatenating the 16 views into a 24576-dimensional input.
+epochs: 50
+k: 16
+lr: 1e-3
+batch_size: 512
+hidden_dim: 1000
+
+weight_decay: 0
+
+dataset:
+  features_instead: 'extracted_features_giant_rgb_light_preprocess'
+  flips: false
+
+model: 'AggregationModel'

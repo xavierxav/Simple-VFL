@@ -1,0 +1,40 @@
+# @package _global_
+
+
+# classes: 4 (four land types)
+# parties: 16
+# epochs: 50
+# metric: accuracy
+# learning_rate: 1e-5
+# batch_size: 32
+# loss_function: Cross-Entropy
+# early_stopping: None
+# channel: 13 # set in model
+# kernel_size : 9 # set in model
+# out_activation: None
+# agg_hidden: [1000, out_dim]
+# out_dim: 4 (same as #classes)
+# optimizer: Adam
+# weight_decay: 1e-5
+# lr_scheduler: StepLR(step_size=10, gamma=0.5)
+
+
+# NOTE: the archived config used batch_size=1; the VertiBench paper reports 32.
+# This config is not used for the frozen-feature rows in README/RESULTS.
+epochs: 50
+k: 16
+lr: 1e-5
+batch_size: 1
+hidden_dim: 1000
+weight_decay: 1e-5
+early_stopping: null
+
+scheduler:
+  type: StepLR
+  step_size: 10
+  factor: 0.5
+
+dataset:
+  dataset_name: 'VertibenchData'
+
+model: 'VertibenchReproduction'

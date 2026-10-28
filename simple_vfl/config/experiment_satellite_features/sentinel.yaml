@@ -1,0 +1,16 @@
+# @package _global_
+
+epochs: 50
+k: 16
+lr: 1e-3
+batch_size: 512
+hidden_dim: 1000
+
+weight_decay: 0
+
+dataset:
+  features_instead : 'extracted_features_giant_rgb_light_preprocess'
+  flips : false
+
+
+model: 'SatelliteFeaturesCentralized2layers'

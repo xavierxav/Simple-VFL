@@ -1,0 +1,20 @@
+# @package _global_
+
+# Two-party fusion: one SPOT encoder and one Sentinel encoder that averages its
+# 16 views locally. The coordinator sees 2 x 1000 dimensions, not 17 x 1000.
+epochs: 50
+k: 17
+lr: 1e-3
+batch_size: 512
+hidden_dim: 1000
+
+weight_decay: 0
+
+dataset:
+  dataset_name: 'SPOTAndSentinelDataset'
+  label_type: sources
+  num_classes: 4
+  features_instead: 'extracted_features_giant_rgb_light_preprocess'
+  spot_features_instead: 'extracted_features_giant_ps_normalized'
+
+model: 'SPOTandSentinelMeanEmbeddingModel'

@@ -1,0 +1,22 @@
+# @package _global_
+
+# Horizontal proxy with the same two sensors as `spot_and_sentinel`, but a
+# single Sentinel revisit. Uses `SpecialModel` (one shared encoder for both
+# views). The 17-view final model uses two encoders with weighted logits, so
+# this is a 1-vs-16 Sentinel-revisit control, not an exact architecture match.
+epochs: 50
+k: 2
+lr: 1e-3
+batch_size: 512
+hidden_dim: 1000
+
+weight_decay: 0
+
+dataset:
+  features_instead: 'extracted_features_giant_rgb_light_preprocess'
+  spot_features_instead: 'extracted_features_giant_ps_normalized'
+  dataset_name: 'HorizontalSPOTAndOneSentinelDataset'
+  label_type: sources
+  num_classes: 4
+
+model: 'SpecialModel'

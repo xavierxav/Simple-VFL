@@ -1,0 +1,80 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simple-vfl"
+version = "1.0.0"
+description = "Compact PyTorch implementation of Vertical Federated Learning (VFL) with SplitNN models, Hydra, and DINOv2 satellite features"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Xavier Desprez" }]
+keywords = [
+    "vertical-federated-learning",
+    "splitnn",
+    "pytorch",
+    "hydra",
+    "satellite-imagery",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "addict>=2.4,<3",
+    "hydra-core>=1.3,<1.4",
+    "hydra-joblib-launcher>=1.2,<2",
+    "matplotlib>=3.8,<4",
+    "numpy>=1.26,<3",
+    "omegaconf>=2.3,<2.4",
+    "pandas>=2.0,<4",
+    "pillow>=10,<13",
+    "python-dotenv>=1.0,<2",
+    "requests>=2.31,<3",
+    "scikit-learn>=1.3,<2",
+    "tensorboard>=2.15,<3",
+    "tifffile>=2024.1,<2027",
+    "torch>=2.2,<3",
+    "torchmetrics>=1.4,<2",
+    "torchvision>=0.17,<1",
+    "tqdm>=4.66,<5",
+    "transformers>=4.40,<6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+    "ruff>=0.6,<1",
+]
+
+[project.scripts]
+simple-vfl = "simple_vfl.main_pipeline:main"
+
+[project.urls]
+Homepage = "https://github.com/xavierxav/Simple-VFL"
+Repository = "https://github.com/xavierxav/Simple-VFL"
+Issues = "https://github.com/xavierxav/Simple-VFL/issues"
+
+[tool.setuptools.packages.find]
+include = ["simple_vfl*"]
+
+[tool.setuptools.package-data]
+simple_vfl = ["config/*.yaml", "config/**/*.yaml"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+exclude = ["worldstrat_downloading_and_features_extraction"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import sorting, pyupgrade and bugbear.
+# The legacy `worldstrat_...` scripts are excluded from linting (see above).
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

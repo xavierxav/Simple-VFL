@@ -1,0 +1,17 @@
+defaults:
+  - standard/standard
+  - _self_
+  - standard/standard_output_folder_naming
+  - override hydra/job_logging: custom
+dataset:
+  dataset_name: CreditDataset
+  num_classes: 2
+  num_features: 11
+
+epochs: 10
+lr: 0.001
+batch_size: 512
+k: 2
+hidden_dim: 100
+
+model: 'CreditModel'
