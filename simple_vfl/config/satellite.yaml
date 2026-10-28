@@ -1,0 +1,18 @@
+defaults:
+  - standard/standard
+  - _self_
+  - standard/standard_output_folder_naming
+  - override hydra/job_logging: custom
+
+dataset:
+  dataset_name: SentinelDataset
+  num_classes: 4
+  label_type: sources
+
+
+epochs: 100
+lr: 1e-3
+batch_size: 128
+k: 2
+# class_weights: [1/198, 1/351, 1/2407, 1/981]
+# rgb: False

@@ -1,0 +1,49 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Datasets and raw imagery
+data/
+*.tif
+*.tiff
+*.npy
+*.npz
+
+# Model checkpoints and serialized objects
+*.pt
+*.pth
+*.ckpt
+*.pkl
+
+# Experiment outputs and logs
+outputs/
+results/
+trash/
+*.log
+events.out.tfevents.*
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Caches and editor files
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.DS_Store
+.vscode/
+
+# Virtual environments
+.venv/

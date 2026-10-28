@@ -1,0 +1,15 @@
+# @package _global_
+#This is designed to remove redundant naming of the output files
+# to understand read https://github.com/facebookresearch/hydra/issues/1873
+
+
+my_excludes: # regex to exclude from the overrides values in Hydra
+  experiment: experiment*
+  self: my_excludes
+
+hydra:
+  sweep:
+    dir: "outputs/multirun/${dataset.dataset_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+    subdir: "${hydra.job.num}_${custom_name_for_hydra_outputs_folder: ${hydra.overrides.task}, ${oc.dict.values:my_excludes}}"
+  run:
+    dir: "outputs/${dataset.dataset_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}/${custom_name_for_hydra_outputs_folder: ${hydra.overrides.task}, ${oc.dict.values:my_excludes}}"

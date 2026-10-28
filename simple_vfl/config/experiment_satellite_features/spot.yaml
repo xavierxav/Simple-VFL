@@ -1,0 +1,19 @@
+# @package _global_
+
+epochs: 50
+k: 1
+lr: 1e-3
+batch_size: 512
+hidden_dim: 1000
+
+weight_decay: 0
+
+
+dataset:
+  features_instead : 'extracted_features_giant_ps_normalized'
+  label_type: sources
+  num_classes: 4
+  dataset_name: 'SPOTDataset'
+
+model: 'SatelliteFeaturesCentralized2layers'
+
