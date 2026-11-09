@@ -11,6 +11,8 @@ head on the received features; its later training epochs need no further
 communication with the parties. Easier in practice: the backbone is never
 trained federated, the upload happens once, and only a small head is fitted.
 
+This repository was rebuilt in 2026 from the code and results of a 2024 CEA research internship; the experiment tables below are from that work.
+
 ## Result
 
 **82.47 ± 0.70% accuracy / 95.08 ± 0.17 AUC** on VertiBench's official test set —
