@@ -47,3 +47,6 @@ htmlcov/
 
 # Virtual environments
 .venv/
+
+# Experiment logs
+experiments/
