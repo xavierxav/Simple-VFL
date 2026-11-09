@@ -4,34 +4,30 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Practical VFL with foundation models is easier—and highly competitive.**
-Each party runs a frozen foundation model on its own images, sends a compact
-feature once, and keeps the pixels. The coordinator trains a small prediction
-head on the received features; its later training epochs need no further
-communication with the parties. Easier in practice: the backbone is never
-trained federated, the upload happens once, and only a small head is fitted.
+**Federated learning without the headache: each party sends its images' features once, and that's it.**
 
-This repository was rebuilt in 2026 from the code and results of a 2024 CEA research internship; the experiment tables below are from that work.
+I built this during a 2024 research internship at CEA, where the question was
+practical: satellite images live with different owners, and nobody wants to
+ship pixels around or spend weeks passing activations back and forth. So I tried
+the simplest thing that could work — everybody runs the same frozen vision model
+(DINOv2) locally, uploads the features once, and a small head is trained on top.
+No federated backbone training, no round trips.
 
-## Result
+It worked better than expected: **+1.30 points over the published baseline** on
+VertiBench's official test set. [Full tables and protocol details](RESULTS.md)
 
-**82.47 ± 0.70% accuracy / 95.08 ± 0.17 AUC** on VertiBench's official test set —
-**+1.30 points** over the published SplitNN baseline (81.17 ± 0.35%), with a frozen
-backbone, a single upload, and 3 RGB bands instead of 13. [Full tables](RESULTS.md)
+This repository was rebuilt in 2026 from the code and results of that 2024 CEA
+internship; the experiment tables are from that work.
 
-## Key contributions
+## What this repo shows
 
-- **One-shot VFL with frozen foundation features.** Each party runs DINOv2
-  locally, uploads one 1536-d vector per sample, and the coordinator trains a
-  small head. No federated backbone training and no per-round activations.
-- **A privacy/communication trade-off.** For lower-trust settings, a few-round
-  variant exchanges four logits per view per round—SplitNN-like exposure with
-  far smaller messages.
-- **A two-sensor satellite benchmark.** WorldStrat with one SPOT party and one
-  Sentinel party, IPCC labels, and a location-only audit.
-- **Controlled evidence.** 82.47% on VertiBench against the published 81.17%
-  SplitNN; 77.93% on IPCC against 70.66% for location alone; a capacity-matched
-  control shows the multi-view gain is not head size.
+- **One idea, carried through.** Frozen features + one upload + a small head.
+  The code runs end to end and the result holds over multiple seeds.
+- **Honest ablations.** A location-only baseline, a capacity-matched control,
+  and a few-round logits variant for lower-trust settings — including the
+  negative result (coordinates alone beat images on one label set).
+- **A second, exploratory benchmark.** A two-sensor SPOT + Sentinel setup on
+  WorldStrat, with IPCC labels and a location-only audit.
 
 ## How it works
 
