@@ -11,6 +11,12 @@ head on the received features; its later training epochs need no further
 communication with the parties. Easier in practice: the backbone is never
 trained federated, the upload happens once, and only a small head is fitted.
 
+## Result
+
+**82.47 ± 0.70% accuracy / 95.08 ± 0.17 AUC** on VertiBench's official test set —
+**+1.30 points** over the published SplitNN baseline (81.17 ± 0.35%), with a frozen
+backbone, a single upload, and 3 RGB bands instead of 13. [Full tables](RESULTS.md)
+
 ## Key contributions
 
 - **One-shot VFL with frozen foundation features.** Each party runs DINOv2
