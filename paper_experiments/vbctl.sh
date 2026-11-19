@@ -5,7 +5,7 @@ cd /home/opencode/projects/Simple-VFL || exit 1
 run() {
   local out
   for i in 1 2 3 4; do
-    out=$(colab exec -s "${VB_SESSION:-vb}" --timeout "${T:-90}" -f paper_experiments/colab_ctl.py "$@" 2>&1)
+    out=$(timeout $(( ${T:-90} + 90 )) colab exec -s "${VB_SESSION:-vb}" --timeout "${T:-90}" -f paper_experiments/colab_ctl.py "$@" 2>&1)  # the CLI can hang
     if echo "$out" | grep -q "Connection was lost"; then sleep 4; else break; fi
   done
   echo "$out"
