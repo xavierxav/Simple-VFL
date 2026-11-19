@@ -50,3 +50,6 @@ htmlcov/
 
 # Experiment logs
 experiments/
+
+# paper result files (small)
+!paper_results/*.npz
