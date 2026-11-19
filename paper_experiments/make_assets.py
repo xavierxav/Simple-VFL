@@ -153,16 +153,37 @@ if os.path.exists(npz):
     fig.savefig(os.path.join(OUT, "fig_inversion.pdf"))
     plt.close(fig)
 
-# ------------------------------------------------------------------ baselines table
-base = {k: load(f"baseline_{k}.json") for k in ["splitnn_rgb", "splitnn_all", "ssl_rgb", "ssl_all"]}
-if any(base.values()):
-    rows = []
-    for k, label in (("splitnn_rgb", "SplitNN, ResNet18, 3 bands"), ("splitnn_all", "SplitNN, ResNet18, 13 bands"), ("ssl_rgb", "FedOnce-style SimCLR, 3 bands"), ("ssl_all", "FedOnce-style SimCLR, 13 bands")):
+# ------------------------------------------------------------------ main comparison table (VertiBench)
+base = {k: load(f"baseline_{k}.json") for k in ["splitnn_all", "splitnn_rgb", "ssl_all", "ssl_rgb"]}
+tim = load("vb_timing.json")
+if bb or any(base.values()):
+    MiB = 1024 * 1024
+    grp = lambda t: f"\\multicolumn{{6}}{{@{{}}l}}{{\\emph{{{t}}}}} \\\\"  # noqa: E731
+    rows = [grp("Iterative: split learning, end-to-end"), "SplitNN, published~\\cite{wu2024vertibench} & 13 & -- & $81.17$\\,{\\scriptsize$\\pm$0.35} & -- & -- \\\\"]
+    for k, bands in (("splitnn_all", 13), ("splitnn_rgb", 3)):
         b = base[k]
         if b:
-            secs = b.get("secs_per_seed", [None])[0] or b.get("ssl_pretrain_secs_all_parties")
-            rows.append(f"{label} & {pm(b['summary'])} & {pm(b['summary'], 'auc')} & {secs / 60:.0f} \\\\")
-    write("tab_baselines.tex", "\n".join(rows))
+            ep = b["epochs"]
+            comm = 2 * 16 * 512 * 4 * ep / MiB  # activations forward + gradients backward, float32, every epoch
+            gpu = np.mean(b["secs_per_seed"]) / 60
+            rows.append(f"SplitNN, ResNet-18 & {bands} & {comm:.1f}\\,MiB ({ep} ep.) & {pm(b['summary'])} & {pm(b['summary'], 'auc')} & {gpu:.0f} \\\\")
+    rows += ["\\midrule", grp("One-shot: self-supervised encoder trained by each party (FedOnce-style)")]
+    for k, bands in (("ssl_all", 13), ("ssl_rgb", 3)):
+        b = base[k]
+        if b:
+            gpu = b["ssl_pretrain_secs_all_parties"] / 60
+            rows.append(f"SimCLR, ResNet-18 & {bands} & {16 * 512 * 4 / 1024:.0f}\\,KiB & {pm(b['summary'])} & {pm(b['summary'], 'auc')} & {gpu:.0f} \\\\")
+    if bb:
+        rows += ["\\midrule", grp("One-shot: frozen foundation encoder, no party-side training (this work)")]
+        for k in ("dinov2_g", "dinov2_b", "dinov2_s"):
+            if k in bb:
+                r = bb[k]
+                gpu = f"{tim[k]['gpu_min_all_parties']:.0f}" if tim and k in tim else "--"
+                rows.append(f"{NAMES[k]} & 3 & {16 * r['dim'] * 4 / 1024:.0f}\\,KiB & {pm(r['vertical_mlp2'])} & {pm(r['vertical_mlp2'], 'auc')} & {gpu} \\\\")
+    write("tab_main.tex", "\n".join(rows))
+    if tim:
+        write("timing.tex", "".join(f"\\newcommand{{\\gpu{k.replace('dinov2_', '').upper()}}}{{{tim[k]['gpu_min_all_parties']:.1f}}}" for k in ("dinov2_s", "dinov2_b", "dinov2_l", "dinov2_g") if k in tim)
+              + f"\\newcommand{{\\headSecs}}{{{tim['head_train_secs_dinov2_g_mlp2']:.0f}}}\n")
 
 # ------------------------------------------------------------------ WorldStrat
 ws = load("ws_results.json")

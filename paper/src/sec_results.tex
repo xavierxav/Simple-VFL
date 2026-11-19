@@ -1,12 +1,73 @@
 \section{Results}\label{sec:results}
 
-% VERTIBENCH-MAIN
+\subsection{Frozen features versus trained baselines}\label{sec:exp-main}
 
-% VERTIBENCH-PARETO
+\begin{table}[t]
+\caption{VertiBench Satellite (16 parties, 4 classes, official test set of 785 samples). Upload: payload per sample over the 16 parties during training (float32; SplitNN: activations and gradients at every epoch). GPU: minutes on one L4 for the party-side work (SplitNN: one training run; FedOnce-style: SimCLR pre-training of the 16 encoders; frozen encoders: forward pass over all training and test images of the 16 parties). Mean\,$\pm$\,std over 5 seeds.}\label{tab:main}
+\centering\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lcrccr@{}}
+\toprule
+Method & Bands & Upload / sample & Acc. (\%) & AUC (\%) & GPU min\\
+\midrule
+\inputtab{gen/tab_main.tex}
+\bottomrule
+\end{tabular}
+\end{table}
 
-% VERTIBENCH-PARTIES
+\begin{table}[t]
+\caption{Frozen backbones on VertiBench Satellite (RGB input, 16 parties, one-shot). \emph{1 view}: a single random party per sample (horizontal proxy). Mean\,$\pm$\,std over 5 seeds.}\label{tab:backbones}
+\centering\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrcccc@{}}
+\toprule
+Backbone & $d$ & MLP Acc. & MLP AUC & Linear Acc. & 1 view Acc.\\
+\midrule
+\inputtab{gen/tab_backbones.tex}
+\bottomrule
+\end{tabular}
+\end{table}
 
-% VERTIBENCH-PRIVACY
+% TEXT-MAIN
+
+\subsection{How little needs to be sent?}\label{sec:exp-pareto}
+
+\begin{figure}[t]
+\centering\includegraphics[width=0.72\linewidth]{gen/fig_pareto.pdf}
+\caption{Accuracy versus one-time upload (bytes per sample, 16 parties) for per-party PCA ($d'\in\{1536,\dots,16\}$, points from right to left within a curve) and uniform scalar quantisation. Frozen DINOv2 ViT-g/14, MLP head, mean\,$\pm$\,std over 5 seeds.}\label{fig:pareto}
+\end{figure}
+
+% TEXT-PARETO
+
+\subsection{Fewer parties, missing parties}\label{sec:exp-parties}
+
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{gen/fig_parties.pdf}
+\caption{Left: accuracy with $k$ randomly chosen parties (3 subsets $\times$ 3 seeds). Right: parties missing at inference (their upload replaced by zeros), for heads trained with and without party-level dropout.}\label{fig:parties}
+\end{figure}
+
+% TEXT-PARTIES
+
+\subsection{What does the upload leak?}\label{sec:exp-privacy}
+
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{gen/fig_inversion.pdf}
+\caption{Feature-inversion attack on held-out test images ($64\times64$ RGB thumbnails). First row: originals; second: nearest training image in feature space; then decoder outputs for several upload formats.}\label{fig:inversion}
+\end{figure}
+
+\begin{table}[t]
+\caption{Utility versus leakage of the upload format. Accuracy: VertiBench test (Sec.~\ref{sec:exp-pareto}); PSNR/SSIM: inversion attack on the test uploads (higher = more leakage).}\label{tab:privacy}
+\centering\scriptsize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Upload format & Acc. (\%) & PSNR (dB) & SSIM\\
+\midrule
+\inputtab{gen/tab_privacy.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+% TEXT-PRIVACY
 
 \subsection{WorldStrat: two sensors, and what a random split hides}\label{sec:exp-ws}
 
@@ -20,7 +81,7 @@
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}
 Inputs & Acc. & AUC & Acc. & AUC\\
 \midrule
-\input{gen/tab_ws_ipcc}
+\inputtab{gen/tab_ws_ipcc.tex}
 \bottomrule
 \end{tabular}
 \end{table}
