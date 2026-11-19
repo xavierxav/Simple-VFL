@@ -41,5 +41,14 @@ elif A == "tail":
     print(sh("nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv,noheader; df -h /content | tail -1; free -g | sed -n 2p").stdout)
 elif A == "cat":
     print(open(os.environ["CTL_PATH"]).read()[-20000:])
+elif A == "b64":  # results dir (small files only) as a base64 tarball between markers
+    import base64, io, tarfile
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+        for f in os.listdir("/content/results"):
+            fp = os.path.join("/content/results", f)
+            if os.path.isfile(fp) and os.path.getsize(fp) < 5_000_000:
+                t.add(fp, arcname=f)
+    print("B64START" + base64.b64encode(buf.getvalue()).decode() + "B64END")
 elif A == "ls":
     print(sh("ls -la /content/results /content/logs /content/cache/vb 2>&1 | head -60").stdout)
