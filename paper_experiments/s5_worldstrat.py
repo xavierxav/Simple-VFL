@@ -20,7 +20,7 @@ from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
-from pe_common import DEV, auc_macro_ovr, evaluate, fmt, save_json, summarize, train_head
+from pe_common import DEV, auc_macro_ovr, evaluate, fmt, robust_download, save_json, summarize, train_head
 
 ROOT = os.environ.get("PE_WS", "/content/ws")
 HF = "https://huggingface.co/datasets/xavvierxav/L1C_dataset/resolve/main"
@@ -40,12 +40,12 @@ def sh(c):
 def ensure_data():
     os.makedirs(ROOT, exist_ok=True)
     if not os.path.exists(f"{ROOT}/metadata.csv"):
-        sh(f"curl --http1.1 -L --retry 5 -s -o {ROOT}/metadata.csv '{META_URL}'")
+        robust_download(META_URL, f"{ROOT}/metadata.csv", 1000)
     if not glob.glob(f"{ROOT}/sent/**/*_class_token.npy", recursive=True):
-        sh(f"curl --http1.1 -L --retry 5 -s -o {ROOT}/sent.zip {HF}/extracted_features_giant_rgb_light_preprocess.zip")
+        robust_download(f"{HF}/extracted_features_giant_rgb_light_preprocess.zip", f"{ROOT}/sent.zip", 388_000_000)
         sh(f"mkdir -p {ROOT}/sent && cd {ROOT}/sent && unzip -q -o ../sent.zip")
     if not glob.glob(f"{ROOT}/spot/**/*_class_token.npy", recursive=True):
-        sh(f"curl --http1.1 -L --retry 5 -s -o {ROOT}/spot.7z {HF}/extracted_features_giant_ps_normalized.7z")
+        robust_download(f"{HF}/extracted_features_giant_ps_normalized.7z", f"{ROOT}/spot.7z", 22_000_000)
         sh("which 7z >/dev/null 2>&1 || apt-get install -y -q p7zip-full >/dev/null 2>&1")
         sh(f"mkdir -p {ROOT}/spot && cd {ROOT}/spot && 7z x -y -bso0 -bsp0 ../spot.7z")
 

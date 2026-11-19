@@ -170,3 +170,27 @@ def split_val(n, seed, frac=0.15, y=None):
     idx = np.arange(n)
     tr, va = train_test_split(idx, test_size=frac, random_state=seed, stratify=y)
     return tr, va
+
+
+def robust_download(url, path, min_bytes=1):
+    """HF's CDN often cuts long streams: use aria2c (multi-connection, resumable) and fall back to a curl resume loop."""
+    import shutil
+    import subprocess
+    import time
+
+    if os.path.exists(path) and os.path.getsize(path) >= min_bytes and not os.path.exists(path + ".aria2"):
+        return path
+    d, n = os.path.dirname(path), os.path.basename(path)
+    os.makedirs(d, exist_ok=True)
+    if shutil.which("aria2c") is None:
+        subprocess.run("apt-get install -y -q aria2 > /dev/null 2>&1", shell=True)
+    for attempt in range(30):
+        if shutil.which("aria2c"):
+            subprocess.run(f"aria2c -q -x 8 -s 8 -k 8M -c --max-tries=20 --retry-wait=2 --timeout=30 --file-allocation=none -d {d} -o {n} '{url}'", shell=True)
+        else:
+            subprocess.run(f"curl --http1.1 -L -C - -s -o {path} '{url}'", shell=True)
+        if os.path.exists(path) and os.path.getsize(path) >= min_bytes and not os.path.exists(path + ".aria2"):
+            return path
+        print("download retry", attempt, url, flush=True)
+        time.sleep(3)
+    raise RuntimeError(f"could not download {url}")
