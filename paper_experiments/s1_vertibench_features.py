@@ -51,7 +51,12 @@ def ensure_data():
         return os.path.join(root, "Vertibench")
     os.makedirs(WORK, exist_ok=True)
     if not os.path.exists(ARCHIVE) or os.path.getsize(ARCHIVE) != EXPECTED:
-        sh(f"curl --http1.1 -L --retry 5 --retry-delay 10 -C - -s -o {ARCHIVE} {URL}")
+        for attempt in range(40):  # resumable: the HF CDN sometimes drops long streams
+            subprocess.run(f"curl --http1.1 -L -C - -s -o {ARCHIVE} {URL}", shell=True)
+            if os.path.exists(ARCHIVE) and os.path.getsize(ARCHIVE) == EXPECTED:
+                break
+            print("download attempt", attempt, "size", os.path.getsize(ARCHIVE) if os.path.exists(ARCHIVE) else 0, flush=True)
+            time.sleep(5)
     assert os.path.getsize(ARCHIVE) == EXPECTED, os.path.getsize(ARCHIVE)
     os.makedirs(root, exist_ok=True)
     t = time.time()
