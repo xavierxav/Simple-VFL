@@ -1,0 +1,34 @@
+\section{Results}\label{sec:results}
+
+% VERTIBENCH-MAIN
+
+% VERTIBENCH-PARETO
+
+% VERTIBENCH-PARTIES
+
+% VERTIBENCH-PRIVACY
+
+\subsection{WorldStrat: two sensors, and what a random split hides}\label{sec:exp-ws}
+
+\begin{table}[t]
+\caption{WorldStrat, IPCC land cover (7 classes, 3{,}925 locations). Frozen DINOv2 ViT-g/14 features, MLP head. \emph{Random}: POI-grouped random split, 5 seeds, fixed test set of 589 locations. \emph{Spatial}: 5 geographically disjoint folds (each fold is the test set once). Accuracy and macro AUC in \%, mean\,$\pm$\,std. The majority class gives 43.3\,\% (random) and 48.4\,\% on average (spatial).}\label{tab:ws}
+\centering\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+ & \multicolumn{2}{c}{random split} & \multicolumn{2}{c}{spatial split}\\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Inputs & Acc. & AUC & Acc. & AUC\\
+\midrule
+\input{gen/tab_ws_ipcc}
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:ws} reproduces the preliminary random-split numbers within one point (Sentinel 16 revisits: $77.35\pm0.51$\,\%) and adds what that protocol cannot show.
+
+\paragraph{The random split rewards geography.}
+A random forest that only sees longitude and latitude reaches $70.6$\,\% accuracy and $86.6$\,\% AUC under the random split, 27 points above the majority class and only 5--7 points below the image models: neighbouring locations share their land cover, and a random split puts neighbours on both sides. Under the spatial split the same model falls to $33.8\pm6.7$\,\% (AUC $58.4$), \emph{below} the majority class of every test fold, while the frozen image features lose only 2--5 points of accuracy (SPOT: $75.6\to73.8$\,\%, AUC $94.1\to88.8$). The image representation therefore transfers to regions that were never seen during training; the location shortcut does not. The fold-to-fold spread (SPOT: 65.6--81.9\,\%) is driven by the class mix of each region (the majority class covers 32--65\,\% of a fold) and dwarfs the differences between input combinations; we therefore compare combinations with paired differences on the same folds.
+
+\paragraph{Multi-sensor gains shrink in new regions.}
+Under the random split, concatenating SPOT with the 16 Sentinel revisits improves over SPOT alone on every seed ($+2.5$ accuracy points, $+0.55$ AUC). Under the spatial split this gain disappears ($-0.5$ points, better on 1 fold out of 5). The most robust one-shot fusion is also the simplest: SPOT concatenated with the \emph{average} of the Sentinel revisit features ($2\times1536$ inputs, no learned weighting, no selection on the test set) matches SPOT in accuracy and beats the Sentinel-only model in AUC on all five spatial folds ($+2.0$ points). A head twice as wide on SPOT alone does not change the results ($-0.03$ and $-1.1$ points), so the random-split fusion gain is not a capacity effect. Temporal depth helps consistently: 16 Sentinel revisits beat a single random revisit by $+4.1$ (random) and $+3.0$ (spatial) points, on every seed and fold. The 4-class simplified label shows the same pattern (Appendix table in the repository).
