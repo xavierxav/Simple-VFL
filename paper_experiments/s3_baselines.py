@@ -274,7 +274,13 @@ if __name__ == "__main__":
     a.res = 80 if a.res == "80" else "full"
     a.tag = "_r80" if a.res == 80 else ""
     if a.mode == "pack":
+        from s1_vertibench_features import ensure_data  # download check + 7z extraction of the raw files
+
+        RAW = ensure_data()
+        os.makedirs(CACHE, exist_ok=True)
         for sp in ("train", "test"):
+            if not os.path.exists(f"{CACHE}/labels_{sp}.npy"):
+                np.save(f"{CACHE}/labels_{sp}.npy", np.load(f"{RAW}/label_{sp}.npy").astype(np.int64))
             pack_full(sp)
     elif a.mode == "splitnn":
         a.epochs, a.bs = a.epochs or 40, a.bs or 64
