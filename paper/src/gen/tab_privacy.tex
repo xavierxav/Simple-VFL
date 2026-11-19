@@ -1,0 +1,16 @@
+full, float32 & 96\,KiB & 82.73\,{\scriptsize$\pm$0.57} & 25.2 & 0.649 & -- \\
+full, 8-bit & 24\,KiB & 82.60\,{\scriptsize$\pm$0.67} & 25.2 & 0.649 & -- \\
+full, 4-bit & 12\,KiB & 82.75\,{\scriptsize$\pm$0.63} & 25.1 & 0.649 & -- \\
+full, 1-bit & 3\,KiB & 81.53\,{\scriptsize$\pm$0.55} & 24.4 & 0.642 & -- \\
+PCA-256, float32 & 16\,KiB & 84.23\,{\scriptsize$\pm$0.25} & 21.1 & 0.612 & -- \\
+PCA-64, float32 & 4\,KiB & 83.62\,{\scriptsize$\pm$0.42} & 21.3 & 0.593 & -- \\
+PCA-16, float32 & 1\,KiB & 80.66\,{\scriptsize$\pm$0.43} & 21.2 & 0.598 & -- \\
+PCA-64, 8-bit & 1\,KiB & 83.54\,{\scriptsize$\pm$0.49} & 21.3 & 0.590 & -- \\
+PCA-16, 4-bit & 128\,B & 80.87\,{\scriptsize$\pm$0.41} & 21.1 & 0.598 & -- \\
+\midrule
+full + noise, $\rho=0.3$ & 96\,KiB & 82.55\,{\scriptsize$\pm$0.58} & 24.9 & 0.647 & $7.8\times10^{4}$ \\
+full + noise, $\rho=1$ & 96\,KiB & 79.92\,{\scriptsize$\pm$0.42} & 24.1 & 0.640 & $7.4\times10^{3}$ \\
+full + noise, $\rho=3$ & 96\,KiB & 76.66\,{\scriptsize$\pm$0.73} & 22.5 & 0.624 & 927 \\
+\midrule
+\emph{reference:} mean training image & -- & -- & 19.0 & 0.594 & -- \\
+\emph{reference:} nearest training neighbour & -- & -- & 21.2 & 0.505 & -- \\
