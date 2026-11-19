@@ -1,0 +1,33 @@
+{
+ "gpu": "NVIDIA A100-SXM4-40GB",
+ "dinov2_s": {
+  "gpu_ms_per_image": 0.13007478756482702,
+  "io_ms_per_image": 2.0386627113492835,
+  "gpu_min_all_parties": 0.13621431753788688,
+  "params_m": 22.056576
+ },
+ "dinov2_b": {
+  "gpu_ms_per_image": 0.24799971273945517,
+  "io_ms_per_image": 0.9902623866789664,
+  "gpu_min_all_parties": 0.25970529918075747,
+  "params_m": 86.58048
+ },
+ "dinov2_l": {
+  "gpu_ms_per_image": 0.7001407430249366,
+  "io_ms_per_image": 0.974370293523156,
+  "gpu_min_all_parties": 0.7331873860957134,
+  "params_m": 304.36864
+ },
+ "dinov2_g": {
+  "gpu_ms_per_image": 2.389639824685741,
+  "io_ms_per_image": 1.0150963906495152,
+  "gpu_min_all_parties": 2.502430824410908,
+  "params_m": 1136.480768
+ },
+ "clip_l14": {
+  "gpu_ms_per_image": 1.3117111844670462,
+  "io_ms_per_image": 0.982696959958723,
+  "gpu_min_all_parties": 1.3736239523738907,
+  "params_m": 303.179776
+ }
+}
