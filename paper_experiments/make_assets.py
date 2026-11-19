@@ -155,7 +155,8 @@ if os.path.exists(npz):
 
 # ------------------------------------------------------------------ main comparison table (VertiBench)
 base = {k: load(f"baseline_{k}.json") for k in ["splitnn_all", "splitnn_rgb", "ssl_all", "ssl_rgb"]}
-tim = load("vb_timing.json")
+tim = load("vb_timing_A100.json") or load("vb_timing_L4.json")  # same GPU as the baselines when available
+tim_gpu = (tim or {}).get("gpu", "")
 if bb or any(base.values()):
     MiB = 1024 * 1024
     grp = lambda t: f"\\multicolumn{{6}}{{@{{}}l}}{{\\emph{{{t}}}}} \\\\"  # noqa: E731
@@ -175,7 +176,7 @@ if bb or any(base.values()):
             rows.append(f"SimCLR, ResNet-18 & {bands} & {16 * 512 * 4 / 1024:.0f}\\,KiB & {pm(b['summary'])} & {pm(b['summary'], 'auc')} & {gpu:.0f} \\\\")
     if bb:
         rows += ["\\midrule", grp("One-shot: frozen foundation encoder, no party-side training (this work)")]
-        for k in ("dinov2_g", "dinov2_b", "dinov2_s"):
+        for k in ("clip_l14", "dinov2_g", "dinov2_b", "dinov2_s"):
             if k in bb:
                 r = bb[k]
                 gpu = f"{tim[k]['gpu_min_all_parties']:.0f}" if tim and k in tim else "--"

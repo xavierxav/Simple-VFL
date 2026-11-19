@@ -2,7 +2,7 @@
 
 (i) frozen-encoder forward pass, timed on all training images of party 0 and extrapolated to the 16 parties x
 (train + test); data loading is timed separately; (ii) training of the MLP head on the cached DINOv2-g features.
-Run it on an otherwise idle GPU.  Output: $PE_OUT/vb_timing.json
+Run it on an otherwise idle GPU.  Output: $PE_OUT/vb_timing_<GPU>.json (e.g. A100, L4), so runs on several GPUs coexist.
 """
 
 import os
@@ -45,9 +45,13 @@ def time_encoder(name, data, n=3142, chunk=256):
 def main():
     data = ensure_data()
     res = {"gpu": torch.cuda.get_device_name()}
-    for name in ("dinov2_s", "dinov2_b", "dinov2_l", "dinov2_g"):
+    for name in ("dinov2_s", "dinov2_b", "dinov2_l", "dinov2_g", "clip_l14"):
         res[name] = time_encoder(name, data)
         torch.cuda.empty_cache()
+    tag = next((g for g in ("A100", "H100", "L4", "T4", "G4") if g in res["gpu"]), "gpu")
+    if not os.path.exists(f"{CACHE}/feat_dinov2_g_train.npy"):  # VM without cached features: encoders only
+        save_json(f"vb_timing_{tag}.json", res)
+        return
     y = torch.from_numpy(np.load(f"{CACHE}/labels_train.npy")).to(DEV)
     X = torch.from_numpy(np.load(f"{CACHE}/feat_dinov2_g_train.npy")).to(DEV).float()
     tr, va = split_val(len(y), 0, 0.15, y.cpu().numpy())
@@ -58,7 +62,7 @@ def main():
     torch.cuda.synchronize()
     res["head_train_secs_dinov2_g_mlp2"] = time.time() - t0
     print(res, flush=True)
-    save_json("vb_timing.json", res)
+    save_json(f"vb_timing_{tag}.json", res)
 
 
 if __name__ == "__main__":
