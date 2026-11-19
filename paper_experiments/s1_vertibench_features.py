@@ -51,7 +51,7 @@ def ensure_data():
         return os.path.join(root, "Vertibench")
     os.makedirs(WORK, exist_ok=True)
     if not os.path.exists(ARCHIVE) or os.path.getsize(ARCHIVE) != EXPECTED:
-        sh(f"curl -L --retry 5 --retry-delay 10 -s -o {ARCHIVE} {URL}")
+        sh(f"curl --http1.1 -L --retry 5 --retry-delay 10 -C - -s -o {ARCHIVE} {URL}")
     assert os.path.getsize(ARCHIVE) == EXPECTED, os.path.getsize(ARCHIVE)
     os.makedirs(root, exist_ok=True)
     t = time.time()
