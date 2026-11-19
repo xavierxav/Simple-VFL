@@ -9,6 +9,7 @@ usage: python s5_worldstrat.py [--labels sources,ipcc,simplified_ipcc]
 
 import argparse
 import glob
+import json
 import os
 import subprocess
 import time
@@ -68,8 +69,10 @@ def load_all():
 def labels_of(meta, label_type):
     m, ncls = MAPS[label_type]
     key = (lambda r: r["POI"].split("-")[0]) if label_type == "sources" else (lambda r: r["IPCC Class"])
-    y = np.array([m.get(key(r), m["Other"]) if isinstance(key(r), str) else m["Other"] for _, r in meta.iterrows()])
-    return y, ncls
+    other = m.get("Other")  # IPCC labels: missing/unknown -> "Other"; sources: every POI prefix must be known
+    y = np.array([m.get(key(r), other) if isinstance(key(r), str) else other for _, r in meta.iterrows()])
+    assert all(v is not None for v in y), "unknown label"
+    return y.astype(np.int64), ncls
 
 
 # ---------------------------------------------------------------- splits
@@ -161,7 +164,9 @@ def main():
     S = settings(spot, sent)
     folds, clusters = spatial_folds(meta)
     print("spatial fold sizes (train/val/test):", [(len(t), len(v), len(e)) for t, v, e in folds], flush=True)
-    results = {"n_pois": len(meta), "spatial_fold_sizes": [[len(t), len(v), len(e)] for t, v, e in folds]}
+    prev = os.path.join(os.environ.get("PE_OUT", "/content/results"), "ws_results.json")
+    results = json.load(open(prev)) if os.path.exists(prev) else {}  # merge: re-running one label keeps the others
+    results.update({"n_pois": len(meta), "spatial_fold_sizes": [[len(t), len(v), len(e)] for t, v, e in folds]})
     for label in a.labels.split(","):
         y, ncls = labels_of(meta, label)
         y_t = torch.as_tensor(y, device=DEV)
