@@ -10,6 +10,7 @@
 \renewcommand\UrlFont{\rmfamily}
 \makeatletter\newcommand{\inputtab}[1]{\@@input #1 }\makeatother % primitive input: no \relax before \bottomrule
 \newcommand{\pmstd}[1]{{\scriptsize$\pm$#1}}
+\InputIfFileExists{gen/noise.tex}{}{}\InputIfFileExists{gen/timing.tex}{}{}\InputIfFileExists{gen/solo.tex}{}{} % numbers generated from paper_results/
 
 \begin{document}
 \title{Frozen Foundation Features for One-Shot Vertical Federated Learning on Satellite Imagery: Communication, Compression and Leakage}

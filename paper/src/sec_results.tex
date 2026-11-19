@@ -42,7 +42,7 @@ Table~\ref{tab:backbones} varies the frozen encoder under the same head. Accurac
 \caption{Accuracy versus one-time upload (bytes per sample, 16 parties) for per-party PCA ($d'\in\{1536,\dots,16\}$, points from right to left within a curve) and uniform scalar quantisation. Frozen DINOv2 ViT-g/14, MLP head, mean\,$\pm$\,std over 5 seeds.}\label{fig:pareto}
 \end{figure}
 
-% TEXT-PARETO
+Figure~\ref{fig:pareto} shows that most of the 96\,KiB per sample are unnecessary. Uniform 4-bit quantisation of the 1536-d features costs nothing ($82.75$ vs.\ $82.73$\,\%), and one bit per coordinate (3\,KiB) costs 1.2 points. Per-party PCA \emph{improves} accuracy: with 256 or 512 components the head reaches $84.2$--$84.3$\,\% (AUC $95.4$--$95.5$), better than the full upload on all five seeds ($+1.4$ to $+1.6$ points); the projection removes directions on which the head would otherwise over-fit ($16\times1536$ inputs for 2.7k training samples). At 4 bits, PCA-256 needs 2\,KiB per sample ($84.2$\,\%) and PCA-64 512\,B ($83.4$\,\%, still better on all seeds); PCA-32 at 4 bits, 256\,B per sample, matches the full float32 upload ($82.5$\,\%), a $384\times$ reduction. Even 32\,B per sample (16 components, 1 bit, i.e.\ 16 bits per party) keep $77.4$\,\%, the level of our SplitNN rerun, which exchanges 2.5\,MiB per sample. Each party fits its PCA and quantiser on its own training features: the compression needs no coordination, no shared statistics, and the projection basis never leaves the party.
 
 \subsection{Fewer parties, missing parties}\label{sec:exp-parties}
 
@@ -51,28 +51,29 @@ Table~\ref{tab:backbones} varies the frozen encoder under the same head. Accurac
 \caption{Left: accuracy with $k$ randomly chosen parties (3 subsets $\times$ 3 seeds). Right: parties missing at inference (their upload replaced by zeros), for heads trained with and without party-level dropout.}\label{fig:parties}
 \end{figure}
 
-% TEXT-PARTIES
+Accuracy saturates quickly with the number of parties (Fig.~\ref{fig:parties}, left): one random party gives $79.7$\,\%, eight $82.6$\,\% and all sixteen $82.7$\,\%. A head trained with all parties is, however, fragile when parties are missing at inference (their upload replaced by zeros, right panel): it keeps $79.1$\,\% with 4 parties missing but falls to $66.3$\,\% with 8 and to $59.9$\,\% with 12, close to the majority-class rate. Party-level dropout during training (each party's vector is zeroed with probability $p$ and the others rescaled by $1/(1-p)$) removes most of this fragility at no cost when everybody is present: with $p=0.5$, $82.0$\,\% with all parties, $79.2$\,\% with 8 missing and $74.8$\,\% with 12 missing. Since the head is trained locally by the active party, this robustness costs no communication.
 
 \subsection{What does the upload leak?}\label{sec:exp-privacy}
 
 \begin{figure}[t]
 \centering\includegraphics[width=\linewidth]{gen/fig_inversion.pdf}
-\caption{Feature-inversion attack on held-out test images ($64\times64$ RGB thumbnails). First row: originals; second: nearest training image in feature space; then decoder outputs for several upload formats.}\label{fig:inversion}
+\caption{Feature-inversion attack on held-out test images ($64\times64$ RGB thumbnails, four revisits of one test location; brightness $\times3$ for display, identical for all panels). From left to right: original; nearest training image in DINOv2-g feature space; decoder output from the full float32 upload, from its 1-bit quantisation, from PCA-64 and PCA-16 projections, and from the upload with Gaussian noise ($\rho=3$).}\label{fig:inversion}
 \end{figure}
 
 \begin{table}[t]
-\caption{Utility versus leakage of the upload format. Accuracy: VertiBench test (Sec.~\ref{sec:exp-pareto}); PSNR/SSIM: inversion attack on the test uploads (higher = more leakage).}\label{tab:privacy}
+\caption{Utility versus leakage of the upload format (DINOv2 ViT-g/14, 16 parties). Upload: bytes per sample; accuracy on the VertiBench test set; PSNR and SSIM of the inversion attack on the test uploads (higher = more leakage); $\varepsilon$: Gaussian-DP reading at $\delta=10^{-5}$ of the noisy uploads (Sec.~\ref{sec:attack}).}\label{tab:privacy}
 \centering\scriptsize
-\begin{tabular}{@{}lccc@{}}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrcccc@{}}
 \toprule
-Upload format & Acc. (\%) & PSNR (dB) & SSIM\\
+Upload format & Upload & Acc. (\%) & PSNR (dB) & SSIM & $\varepsilon$\\
 \midrule
 \inputtab{gen/tab_privacy.tex}
 \bottomrule
 \end{tabular}
 \end{table}
 
-% TEXT-PRIVACY
+Table~\ref{tab:privacy} and Fig.~\ref{fig:inversion} report the inversion attack. From the full float32 upload, the decoder reaches 25.2\,dB PSNR on held-out test images, against 19.0\,dB for the mean training image and 21.2\,dB for the nearest training image in feature space. Figure~\ref{fig:inversion} shows what this means: the decoder recovers the global brightness and colour of an acquisition---which differ between revisits of the same location---but not its layout, while nearest-neighbour retrieval returns a sharp image of a similar but different place. Quantisation barely reduces leakage (4 bits: 25.1\,dB; 1 bit: 24.4\,dB). Per-party PCA does: with 16 to 256 components the reconstruction falls to 21.1--21.3\,dB, the level of nearest-neighbour retrieval, while accuracy \emph{increases} (Sec.~\ref{sec:exp-pareto}). Gaussian noise is a worse trade-off: $\rho=3$ costs six accuracy points and still leaves 22.5\,dB. The formal reading is unambiguous: with clipping at the median norm ($c=\clipC$), every noise level that keeps a useful accuracy corresponds to $\mu\geq39$, i.e.\ $\varepsilon>900$ at $\delta=10^{-5}$; $\varepsilon=8$ would require $\rho\approx\noiseForEpsEight$ and $\varepsilon=1$ $\rho\approx\noiseForEpsOne$, while accuracy is already down to $66.2$\,\% at $\rho=10$. A per-upload differential-privacy guarantee is therefore vacuous at useful accuracy; PCA is a cheap empirical mitigation against this attacker, not a guarantee.
 
 \subsection{WorldStrat: two sensors, and what a random split hides}\label{sec:exp-ws}
 

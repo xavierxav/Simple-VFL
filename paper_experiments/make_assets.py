@@ -35,6 +35,10 @@ def kib(b):
     return f"{b / 1024:.1f}" if b < 1024 * 1024 else f"{b / 1024 / 1024:.2f}\\,Mi"
 
 
+def fmin(m):
+    return f"{m:.1f}" if m < 10 else f"{m:.0f}"
+
+
 def write(name, text):
     with open(os.path.join(OUT, name), "w") as f:
         f.write(text)
@@ -70,10 +74,17 @@ if par:
         if pts:
             x, y, e = [p[0] for p in pts], [p[1] for p in pts], [p[2] for p in pts]
             ax.errorbar(x, y, yerr=e, marker="o", ms=3, lw=1, capsize=1.5, color=cols[bits], label=f"{bits}-bit" if bits < 32 else "float32")
+    refs = [(81.17, "SplitNN, published (13 bands)")]
+    sn = load("baseline_splitnn_all.json")
+    if sn:
+        refs.append((sn["summary"]["acc"], "SplitNN, ours (13 bands)"))
+    for yv, lab in refs:
+        ax.axhline(yv, color=C["grey"], ls="--" if "published" in lab else ":", lw=0.8)
+        ax.text(ax.get_xlim()[0] if False else 40, yv + 0.12, lab, fontsize=6, color=C["grey"])
     ax.set_xscale("log", base=2)
     ax.set_xlabel("one-time upload per sample, all 16 parties (bytes)")
     ax.set_ylabel("test accuracy (%)")
-    ax.legend(title="precision", ncol=2, frameon=False)
+    ax.legend(title="precision", ncol=3, frameon=False, loc="lower right", fontsize=6, title_fontsize=6)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "fig_pareto.pdf"))
     plt.close(fig)
@@ -104,52 +115,88 @@ if pt:
     fig.savefig(os.path.join(OUT, "fig_parties.pdf"))
     plt.close(fig)
 
+# ------------------------------------------------------------------ Gaussian-DP reading of the noise runs
+def gdp_eps(mu, delta=1e-5):
+    """(eps, delta) of a mu-GDP mechanism (Dong et al.), solved in log space (no overflow for large mu)."""
+    from scipy.special import log_ndtr, ndtr
+
+    f = lambda e: ndtr(-e / mu + mu / 2) - np.exp(e + log_ndtr(-e / mu - mu / 2)) - delta  # noqa: E731
+    lo, hi = 0.0, mu * mu + 20 * mu + 50
+    for _ in range(300):
+        m = (lo + hi) / 2
+        lo, hi = (m, hi) if f(m) > 0 else (lo, m)
+    return hi
+
+
+noise = load("vb_noise.json")
+if noise:
+    rows = []
+    for n in noise:
+        if n["noise_ratio"] > 0:
+            mu = 2 * n["C"] / n["sigma_per_coord"]
+            e = gdp_eps(mu)
+            ex = int(np.floor(np.log10(e)))
+            es = f"{e:.0f}" if e < 1000 else f"${e / 10**ex:.1f}\\times10^{{{ex}}}$"
+            rows.append(f"{n['noise_ratio']:g} & {pm(n)} & {pm(n, 'auc')} & {mu:.1f} & {es} \\\\")
+    write("tab_noise.tex", "\n".join(rows))
+    # noise multiplier (in units of the mean per-coordinate std) needed for eps = 1 and eps = 8 at delta = 1e-5
+    C0, sd0 = noise[1]["C"], noise[1]["sigma_per_coord"] / noise[1]["noise_ratio"]
+    need = {}
+    for target in (1, 8):
+        lo, hi = 1e-3, 100.0
+        for _ in range(200):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if gdp_eps(mid) < target else (lo, mid)
+        need[target] = 2 * C0 / lo / sd0
+    write("noise.tex", f"\\newcommand{{\\noiseForEpsOne}}{{{need[1]:.0f}}}\\newcommand{{\\noiseForEpsEight}}{{{need[8]:.0f}}}\\newcommand{{\\clipC}}{{{C0:.1f}}}\n")
+
 # ------------------------------------------------------------------ privacy: accuracy vs reconstruction
-inv, noise = load("vb_inversion.json"), load("vb_noise.json")
+inv = load("vb_inversion.json")
 if inv and par:
-    acc = {}
     lookup = {(p["d"], p["bits"]): p for p in par}
     mapping = {"float32 (full 1536-d)": (1536, 32), "int8": (1536, 8), "int4": (1536, 4), "1-bit": (1536, 1), "PCA-256 float32": (256, 32),
                "PCA-64 float32": (64, 32), "PCA-16 float32": (16, 32), "PCA-64 int8": (64, 8), "PCA-16 int4": (16, 4)}
-    for k, v in mapping.items():
-        if v in lookup:
-            acc[k] = lookup[v]
-    if noise:
-        for k, r in (("noise 0.3 x std", 0.3), ("noise 1 x std", 1.0), ("noise 3 x std", 3.0)):
-            for n in noise:
-                if abs(n["noise_ratio"] - r) < 1e-9:
-                    acc[k] = n
-    rows, fig, ax = [], *plt.subplots(figsize=(4.6, 3.1))
+    pretty = {"float32 (full 1536-d)": "full, float32", "int8": "full, 8-bit", "int4": "full, 4-bit", "1-bit": "full, 1-bit",
+              "PCA-256 float32": "PCA-256, float32", "PCA-64 float32": "PCA-64, float32", "PCA-16 float32": "PCA-16, float32",
+              "PCA-64 int8": "PCA-64, 8-bit", "PCA-16 int4": "PCA-16, 4-bit"}
+    size = lambda b: f"{b / 1024:.0f}\\,KiB" if b >= 1024 else f"{b:.0f}\\,B"  # noqa: E731
+    rows = []
     for name, c in inv["conditions"].items():
-        if name in acc:
-            a = acc[name]
-            ax.scatter(c["psnr"], a["acc"], s=18, color=C["red"] if "noise" in name else C["blue"])
-            ax.annotate(name.replace(" float32", "").replace("float32 (full 1536-d)", "full"), (c["psnr"], a["acc"]), fontsize=5.5, xytext=(2, 2), textcoords="offset points")
-            rows.append(f"{name} & {a['acc']:.2f} & {c['psnr']:.2f} & {c['ssim']:.3f} \\\\")
-    ax.axvline(inv["mean_image"]["psnr"], color=C["grey"], ls="--", lw=0.8)
-    ax.text(inv["mean_image"]["psnr"], ax.get_ylim()[0], " mean image", fontsize=6, color=C["grey"], va="bottom")
-    ax.set_xlabel("reconstruction PSNR of the inversion attack (dB, lower = more private)")
-    ax.set_ylabel("VFL test accuracy (%)")
-    fig.tight_layout()
-    fig.savefig(os.path.join(OUT, "fig_privacy.pdf"))
-    plt.close(fig)
-    rows.append(f"\\midrule mean training image & -- & {inv['mean_image']['psnr']:.2f} & {inv['mean_image']['ssim']:.3f} \\\\")
-    rows.append(f"nearest neighbour in gallery & -- & {inv['nearest_neighbour']['psnr']:.2f} & {inv['nearest_neighbour']['ssim']:.3f} \\\\")
+        if name in mapping and mapping[name] in lookup:
+            a_ = lookup[mapping[name]]
+            rows.append(f"{pretty[name]} & {size(a_['bytes_per_sample'])} & {pm(a_)} & {c['psnr']:.1f} & {c['ssim']:.3f} & -- \\\\")
+    rows.append("\\midrule")
+    for name, c in inv["conditions"].items():
+        if name.startswith("noise") and noise:
+            r = float(name.split()[1])
+            n = next(n for n in noise if abs(n["noise_ratio"] - r) < 1e-9)
+            mu = 2 * n["C"] / n["sigma_per_coord"]
+            e = gdp_eps(mu)
+            ex = int(np.floor(np.log10(e)))
+            es = f"{e:.0f}" if e < 1000 else f"${e / 10**ex:.1f}\\times10^{{{ex}}}$"
+            rows.append(f"full + noise, $\\rho={r:g}$ & 96\\,KiB & {pm(n)} & {c['psnr']:.1f} & {c['ssim']:.3f} & {es} \\\\")
+    rows.append("\\midrule")
+    rows.append(f"\\emph{{reference:}} mean training image & -- & -- & {inv['mean_image']['psnr']:.1f} & {inv['mean_image']['ssim']:.3f} & -- \\\\")
+    rows.append(f"\\emph{{reference:}} nearest training neighbour & -- & -- & {inv['nearest_neighbour']['psnr']:.1f} & {inv['nearest_neighbour']['ssim']:.3f} & -- \\\\")
     write("tab_privacy.tex", "\n".join(rows))
 
 npz = os.path.join(RES, "vb_inversion_examples.npz")
 if os.path.exists(npz):
     z = np.load(npz)
     keys = [k for k in z.files]
-    order = ["original", "nearest_neighbour", "float32_full_1536-d", "int8", "1-bit", "PCA-64_float32", "PCA-16_float32", "noise_0.3_x_std", "noise_1_x_std", "noise_3_x_std"]
+    order = ["original", "nearest_neighbour", "float32_full_1536-d", "1-bit", "PCA-64_float32", "PCA-16_float32", "noise_3_x_std"]
+    label = {"original": "original", "nearest_neighbour": "nearest neighbour", "float32_full_1536-d": "full, float32", "1-bit": "full, 1-bit",
+             "PCA-64_float32": "PCA-64", "PCA-16_float32": "PCA-16", "noise_3_x_std": "noise, $\\rho=3$"}
+    GAIN = 3.0  # display only: the 8-bit reflectances are dark; same gain for every row
     keys = [k for k in order if k in keys]
-    fig, axs = plt.subplots(len(keys), 8, figsize=(6.6, 0.82 * len(keys)))
-    for i, k in enumerate(keys):
-        for j in range(8):
-            axs[i, j].imshow(np.transpose(z[k][j], (1, 2, 0)))
+    ex = [0, 3, 4, 6]  # four revisits (parties) of the first test location, with different illumination
+    fig, axs = plt.subplots(len(ex), len(keys), figsize=(6.6, 0.98 * len(ex)))
+    for j, k in enumerate(keys):
+        for i, e in enumerate(ex):
+            axs[i, j].imshow(np.clip(np.transpose(z[k][e], (1, 2, 0)).astype(float) * GAIN / 255, 0, 1))
             axs[i, j].axis("off")
-        axs[i, 0].text(-0.1, 0.5, k.replace("_", " "), transform=axs[i, 0].transAxes, ha="right", va="center", fontsize=6)
-    fig.subplots_adjust(left=0.2, right=0.995, top=0.995, bottom=0.005, wspace=0.03, hspace=0.05)
+        axs[0, j].set_title(label[k], fontsize=7)
+    fig.subplots_adjust(left=0.005, right=0.995, top=0.93, bottom=0.005, wspace=0.04, hspace=0.04)
     fig.savefig(os.path.join(OUT, "fig_inversion.pdf"))
     plt.close(fig)
 
@@ -166,20 +213,20 @@ if bb or any(base.values()):
         if b:
             ep = b["epochs"]
             comm = 2 * 16 * 512 * 4 * ep / MiB  # activations forward + gradients backward, float32, every epoch
-            gpu = np.mean(b["secs_per_seed"]) / 60
-            rows.append(f"SplitNN, ResNet-18 & {bands} & {comm:.1f}\\,MiB ({ep} ep.) & {pm(b['summary'])} & {pm(b['summary'], 'auc')} & {gpu:.0f} \\\\")
+            gpu = fmin(np.mean(b["secs_per_seed"]) / 60)
+            rows.append(f"SplitNN, ResNet-18 & {bands} & {comm:.1f}\\,MiB ({ep} ep.) & {pm(b['summary'])} & {pm(b['summary'], 'auc')} & {gpu} \\\\")
     rows += ["\\midrule", grp("One-shot: self-supervised encoder trained by each party (FedOnce-style)")]
     for k, bands in (("ssl_all", 13), ("ssl_rgb", 3)):
         b = base[k]
         if b:
-            gpu = b["ssl_pretrain_secs_all_parties"] / 60
-            rows.append(f"SimCLR, ResNet-18 & {bands} & {16 * 512 * 4 / 1024:.0f}\\,KiB & {pm(b['summary'])} & {pm(b['summary'], 'auc')} & {gpu:.0f} \\\\")
+            gpu = fmin(b["ssl_pretrain_secs_all_parties"] / 60)
+            rows.append(f"SimCLR, ResNet-18 & {bands} & {16 * 512 * 4 / 1024:.0f}\\,KiB & {pm(b['summary'])} & {pm(b['summary'], 'auc')} & {gpu} \\\\")
     if bb:
         rows += ["\\midrule", grp("One-shot: frozen foundation encoder, no party-side training (this work)")]
         for k in ("clip_l14", "dinov2_g", "dinov2_b", "dinov2_s"):
             if k in bb:
                 r = bb[k]
-                gpu = f"{tim[k]['gpu_min_all_parties']:.0f}" if tim and k in tim else "--"
+                gpu = fmin(tim[k]["gpu_min_all_parties"]) if tim and k in tim else "--"
                 rows.append(f"{NAMES[k]} & 3 & {16 * r['dim'] * 4 / 1024:.0f}\\,KiB & {pm(r['vertical_mlp2'])} & {pm(r['vertical_mlp2'], 'auc')} & {gpu} \\\\")
     write("tab_main.tex", "\n".join(rows))
     if tim:
