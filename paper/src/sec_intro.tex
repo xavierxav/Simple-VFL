@@ -1,0 +1,15 @@
+\section{Introduction}\label{sec:intro}
+
+Vertical federated learning (VFL) lets organisations that hold different views of the same entities train a joint model without pooling their raw data~\cite{liu2024vfl}. For images the setting is natural---different satellites, sensors or agencies observe the same locations---yet open benchmarks and methods remain scarce, and the standard training scheme, split learning~\cite{vepakomma2018splitnn}, is expensive: every party exchanges activations and gradients with the label owner at every mini-batch, for every epoch.
+
+A radical alternative is \emph{one-shot} VFL~\cite{wu2022fedonce}: each party computes a representation of its data, uploads it once, and the label owner trains the rest locally. Its weak point is the representation: FedOnce asks every party to run self-supervised pre-training on its own, often small, dataset. Pre-trained vision foundation models~\cite{oquab2024dinov2} offer a different route: the \emph{same frozen encoder} can be shipped to every party, which only needs a forward pass. This idea was prototyped during a research internship at CEA-LIST on satellite images, with a promising headline number; this paper turns the prototype into a systematic study and answers the questions that a deployment would raise:
+
+\begin{itemize}
+\item \textbf{Does it work, and why?} We compare, on the public VertiBench satellite benchmark and under one common head/protocol, frozen DINOv2 of four sizes, CLIP, a supervised ImageNet ResNet-50, a randomly initialised ViT, and (for the baselines) end-to-end SplitNN and FedOnce-style SimCLR trained on the raw 13-band images (Sec.~\ref{sec:exp-main}).
+\item \textbf{How little needs to be sent?} Per-party PCA and scalar quantisation, fitted without any collaboration, give an accuracy-versus-bytes frontier that goes well below the 96\,KiB per sample of the plain upload (Sec.~\ref{sec:exp-pareto}).
+\item \textbf{What if parties are missing, or fewer?} We measure the accuracy as a function of the number of parties and of parties missing at inference, with and without party-level dropout during training (Sec.~\ref{sec:exp-parties}).
+\item \textbf{What does the upload leak?} We train feature-inversion decoders against each upload format and relate reconstruction quality to accuracy, bytes and Gaussian noise, and we state why a formal privacy guarantee is out of reach at useful accuracy (Sec.~\ref{sec:exp-privacy}).
+\item \textbf{Is the benchmark telling the truth?} On a two-sensor WorldStrat benchmark, a random split lets a location-only model compete with image models; we introduce a geographically disjoint protocol and a selection-free one-shot fusion (Sec.~\ref{sec:exp-ws}).
+\end{itemize}
+
+We also correct the preliminary version of this work: its WorldStrat numbers (near-perfect accuracy on the two-sensor task) are not reproduced by the leakage-free, POI-grouped protocol used here and should be disregarded; we report \emph{only} the corrected protocol.

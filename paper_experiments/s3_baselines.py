@@ -218,7 +218,7 @@ if __name__ == "__main__":
     ap.add_argument("--bs", type=int, default=None)
     a = ap.parse_args()
     if a.mode == "splitnn":
-        a.epochs, a.bs = a.epochs or 30, a.bs or 128
+        a.epochs, a.bs = a.epochs or 30, a.bs or 64
         run_splitnn(a)
     else:
         a.epochs, a.bs = a.epochs or 40, a.bs or 256

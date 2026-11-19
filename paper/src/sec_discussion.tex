@@ -1,0 +1,19 @@
+\section{Discussion and Limitations}\label{sec:discussion}
+
+\paragraph{What the evidence supports.}
+The one-shot protocol with frozen foundation features is a strong, cheap baseline for aligned, complete image-VFL splits: it needs no party-side training, its communication does not depend on the number of epochs, and it compresses well. We do \emph{not} claim a new learning algorithm, the first frozen-backbone result in federated learning~\cite{hu2023flimages}, or a formal privacy guarantee.
+
+\paragraph{Caveats on the comparison with end-to-end training.}
+The published SplitNN reference ($81.17$\,\%) and our frozen-feature numbers differ in input bands, backbone capacity (a frozen 1.1\,B-parameter ViT versus a small ResNet) and pre-training data; they are not a controlled comparison of protocols. Our own SplitNN and SimCLR reruns are controlled with respect to data and head, but they run at reduced resolution and with a modest compute budget, and an end-to-end model with extensive tuning could do better. The VertiBench test set has 785 samples, so differences of one to two points are within test-sampling noise; claims of ranking should rely on the paired, seed-matched comparisons in the tables.
+
+\paragraph{Benchmark limitations.}
+Both benchmarks are multi-view fusion over a fixed, aligned sample set: VertiBench's 16 parties observe the same sensor at different dates, and WorldStrat's two parties observe the same locations with two sensors. No entity resolution, partial overlap, missing labels or non-i.i.d.\ parties are tested. The provider label of VertiBench is spatially clustered, so absolute accuracies partly measure geography. The spatial split reduces but does not eliminate spatial leakage (nearby clusters may share regions), and with five folds and a few hundred POIs per fold, fold-to-fold variance is large.
+
+\paragraph{Privacy.}
+Our inversion experiment is an empirical, adaptive-decoder test with a strong auxiliary-data assumption; low reconstruction quality does not prove that no information leaks (membership, attributes or labels may leak without pixel-accurate reconstruction), and a better attacker could do better. The Gaussian-DP reading applies to the release of a single clipped feature vector and requires noise levels that destroy accuracy; it is not a guarantee for the model trained on top. A deployment that needs real guarantees should combine compression with secure aggregation or MPC-based protocols rather than rely on the weak protection of low-dimensional features.
+
+\paragraph{Cost of the frozen backbone.}
+The ViT-g backbone costs a forward pass per image at each party (we measured the extraction time on a single L4 GPU in Sec.~\ref{sec:exp-main}); parties without accelerators can use smaller backbones, whose accuracy we also report. The backbone itself, e.g.\ DINOv2, is trained on RGB natural images, and we only feed RGB or RGB composites of the multispectral bands.
+
+\paragraph{Reproducibility.}
+All code, configurations, raw result files and the scripts that generate every table and figure are in the repository accompanying this paper; the 13-band VertiBench arrays and the DINOv2 WorldStrat features are public. Training runs for the heads are seconds on a single GPU; feature extraction for all backbones takes a few GPU-hours.
