@@ -231,7 +231,7 @@ if bb or any(base.values()):
     write("tab_main.tex", "\n".join(rows))
     if tim:
         write("timing.tex", "".join(f"\\newcommand{{\\gpu{k.replace('dinov2_', '').upper()}}}{{{tim[k]['gpu_min_all_parties']:.1f}}}" for k in ("dinov2_s", "dinov2_b", "dinov2_l", "dinov2_g") if k in tim)
-              + f"\\newcommand{{\\headSecs}}{{{tim['head_train_secs_dinov2_g_mlp2']:.0f}}}\n")
+              + "".join(f"\\newcommand{{\\headSecs}}{{{t['head_train_secs_dinov2_g_mlp2']:.0f}}}" for t in [load("vb_timing_L4.json") or tim][:1] if "head_train_secs_dinov2_g_mlp2" in t) + "\n")
 
 # ------------------------------------------------------------------ WorldStrat
 ws = load("ws_results.json")
