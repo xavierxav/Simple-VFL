@@ -11,7 +11,7 @@ while [ "$(date +%s)" -lt $end ]; do
   out=$(VB_SESSION=$S bash paper_experiments/vbctl.sh tail chain 4 2>&1)
   echo "$(date +%H:%M) $(echo "$out" | grep -v '^$' | head -4 | tr '\n' ' ' | cut -c1-300)"
   n=$((n + 1))
-  if echo "$out" | grep -q CHAIN_DONE; then
+  if echo "$out" | grep -qx CHAIN_DONE; then  # exact line: process command lines may contain the word
     VB_SESSION=$S bash paper_experiments/vbctl.sh fetch "paper: results ($S, final)"
     colab stop -s "$S"; echo "$(date +%H:%M) chain done, $S stopped"; exit 0
   fi

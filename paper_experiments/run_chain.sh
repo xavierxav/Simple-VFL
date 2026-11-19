@@ -2,6 +2,7 @@
 # Full GPU pipeline on a fresh Colab VM (download included).  Launch detached:  bash vbctl.sh launch chain 'bash run_chain.sh A'
 #   A: WorldStrat provider label, frozen features (s1), heads (s2), inversion (s4), timing (s6)
 #   B: full-resolution end-to-end baselines (s3)
+#   C: RGB baselines and encoder timing only (re-run on a second GPU)
 # Progress: /content/logs/chain.log (one log per step).  Ends with CHAIN_DONE (keepalive.sh then harvests and stops the VM).
 cd "$(dirname "$0")"
 L=/content/logs; mkdir -p $L /content/results /content/vb_raw
@@ -30,6 +31,11 @@ if [ "$1" = A ]; then
   step s1 s1_vertibench_features.py
   step s2 s2_vertibench_heads.py
   step s4 s4_inversion.py
+  step s6 s6_timing.py
+elif [ "$1" = C ]; then
+  step s3pack s3_baselines.py pack
+  step s3_splitnn_rgb s3_baselines.py splitnn --bands rgb
+  step s3_ssl_rgb s3_baselines.py ssl --bands rgb
   step s6 s6_timing.py
 else
   step s3pack s3_baselines.py pack
