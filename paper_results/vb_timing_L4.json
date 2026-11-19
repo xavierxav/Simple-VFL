@@ -1,0 +1,34 @@
+{
+ "gpu": "NVIDIA L4",
+ "dinov2_s": {
+  "gpu_ms_per_image": 0.42618299881263116,
+  "io_ms_per_image": 1.023912338752188,
+  "gpu_min_all_parties": 0.44629883635658735,
+  "params_m": 22.056576
+ },
+ "dinov2_b": {
+  "gpu_ms_per_image": 1.0792378177315016,
+  "io_ms_per_image": 0.9551744108971025,
+  "gpu_min_all_parties": 1.1301778427284284,
+  "params_m": 86.58048
+ },
+ "dinov2_l": {
+  "gpu_ms_per_image": 3.427406468260903,
+  "io_ms_per_image": 0.97982220252102,
+  "gpu_min_all_parties": 3.5891800535628176,
+  "params_m": 304.36864
+ },
+ "dinov2_g": {
+  "gpu_ms_per_image": 10.807922127746155,
+  "io_ms_per_image": 0.9862480461028335,
+  "gpu_min_all_parties": 11.318056052175773,
+  "params_m": 1136.480768
+ },
+ "clip_l14": {
+  "gpu_ms_per_image": 6.691128489775387,
+  "io_ms_per_image": 1.033690004573363,
+  "gpu_min_all_parties": 7.006949754492785,
+  "params_m": 303.179776
+ },
+ "head_train_secs_dinov2_g_mlp2": 2.366793394088745
+}
