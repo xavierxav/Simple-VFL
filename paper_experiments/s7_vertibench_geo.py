@@ -302,6 +302,7 @@ def main():
             pp[:, c.classes_] = c.predict_proba(lonlat[idx][te])
             runs.append({"acc": float((pp.argmax(1) == yc[te]).mean()), "auc": auc_macro_ovr(yc[te], pp)})
         res["location_rf"] = summarize(runs)
+        res["train_majority"] = summarize([{"acc": float((yc[te] == np.bincount(yc[tr], minlength=ncls).argmax()).mean()), "auc": 0.5} for tr, va, te in items])
         print(f"[{reg}] location_rf {fmt(res['location_rf'])}", flush=True)
         for n in names:
             Ftr, Fte = load_feats(n)
