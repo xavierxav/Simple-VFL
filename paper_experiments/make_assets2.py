@@ -1,0 +1,588 @@
+"""Turn the result JSONs (paper_results/) into LaTeX tables, macros and figures (paper/src/gen/) - paper version 2.
+
+usage: python make_assets2.py [results_dir] [out_dir]
+Every number of the paper comes from these files.  Missing inputs are skipped (partial results are fine).
+Spreads are sample standard deviations (ddof=1) recomputed from the per-seed / per-fold values.
+"""
+
+import json
+import os
+import sys
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+
+RES = sys.argv[1] if len(sys.argv) > 1 else "paper_results"
+OUT = sys.argv[2] if len(sys.argv) > 2 else "paper/src/gen"
+os.makedirs(OUT, exist_ok=True)
+plt.rcParams.update({"font.size": 8, "axes.spines.top": False, "axes.spines.right": False, "figure.dpi": 150, "axes.grid": True, "grid.alpha": 0.25})
+C = {"blue": "#2a6fbb", "orange": "#d9772b", "green": "#3a9a5b", "red": "#c0392b", "grey": "#7f8c8d", "purple": "#8e5bb5"}
+KiB, MiB = 1024, 1024 * 1024
+MACROS = {}
+
+
+def load(name):
+    p = os.path.join(RES, name)
+    return json.load(open(p)) if os.path.exists(p) else None
+
+
+def sd(s, key):
+    vals = s.get(key + "s")
+    if vals is not None and len(vals) > 1:
+        return float(np.std(vals, ddof=1))
+    return s.get(key + "_std", 0.0)
+
+
+def pm(s, key="acc", d=1):
+    if s is None or key not in s:
+        return "--"
+    return f"{s[key]:.{d}f}\\,{{\\scriptsize$\\pm${sd(s, key):.{d}f}}}"
+
+
+def size(b):
+    return f"{b / MiB:.2f}\\,MiB" if b >= MiB else (f"{b / KiB:.0f}\\,KiB" if b >= KiB else f"{b:.0f}\\,B")
+
+
+def write(name, text):
+    with open(os.path.join(OUT, name), "w") as f:
+        f.write(text)
+    print("wrote", name)
+
+
+def macro(name, value):
+    MACROS[name] = value
+
+
+def f1(x, d=1):
+    return f"{x:.{d}f}"
+
+
+# ------------------------------------------------------------------ inputs
+rep = load("vb_repro_splitresnet.json")
+enc = load("vb224_encoders.json") or {}
+heads224 = enc.get("heads", {})
+cost = enc.get("cost", {})
+Eg = load("vb224_controls_dinov2_g.json") or {}
+Ec = load("vb224_controls_clip_l14.json") or {}
+Eold = load("vb_controls.json") or {}
+pool = load("vb224_pooling.json")
+inv = load("vb224_inversion.json")
+he = load("he_heads.json") or {}
+milk = load("milk_heads.json")
+msplit = load("milk_split.json") or {}
+cls = load("classic.json") or {}
+ws = load("ws_sensors.json")
+base = {k: load(f"baseline_{k}.json") for k in ["splitnn_all", "splitnn_rgb", "splitnn_rgb_pt", "ssl_all", "ssl_rgb", "nat_all"]}
+K, N_TR = 16, 3142
+
+# ------------------------------------------------------------------ Table: VertiBench main comparison
+NAME = {"dinov2_g_224": "DINOv2 ViT-g/14", "dinov2_l_224": "DINOv2 ViT-L/14", "dinov2_b_224": "DINOv2 ViT-B/14", "dinov2_s_224": "DINOv2 ViT-S/14",
+        "clip_l14_224": "CLIP ViT-L/14", "clip_b16_224": "CLIP ViT-B/16", "siglip_b16_224": "SigLIP ViT-B/16", "resnet50_in1k_224": "ResNet-50, ImageNet (supervised)",
+        "dinov2_b_random_224": "ViT-B/14, random weights", "ssl4eo_s2_vits16": "SSL4EO-S12 ViT-S/16 (13 bands)"}
+r18 = cost.get("vertibench_resnet18_bottom_158px", {}).get("flops_per_image")
+rows = []
+
+
+def row(label, bands, upload, gflops, minutes, s):
+    g = "--" if gflops is None else (f"{gflops:.0f}" if gflops >= 10 else f"{gflops:.1f}")
+    m = "--" if minutes is None else (f"{minutes:.1f}" if minutes < 10 else f"{minutes:.0f}")
+    return f"{label} & {bands} & {upload} & {g} & {m} & {pm(s)} & {pm(s, 'f1')} & {pm(s, 'auc')} \\\\"
+
+
+rows.append("\\multicolumn{8}{@{}l}{\\emph{Split learning (every epoch: activations up, gradients down)}}\\\\")
+rows.append("SplitNN, published~\\cite{wu2024vertibench} & 13 & " + size(4 * K * 512 * 50) + " & -- & -- & 81.2\\,{\\scriptsize$\\pm$0.4} & -- & -- \\\\")
+if rep:
+    s = rep["last_epoch"]
+    tr_gf = 3 * r18 * 50 / 1e9 if r18 else None  # per training image and party: 50 epochs x (forward + backward)
+    rows.append(row("SplitNN, VertiBench recipe (ours)", 13, size(4 * K * 512 * 50), tr_gf, np.mean(rep["secs_per_seed"]) / 60, s))
+    macro("reproAcc", f1(s["acc"]))
+    macro("reproStd", f1(sd(s, "acc")))
+    macro("reproBest", f1(rep["best_epoch_on_test"]["acc"]))
+    macro("reproMin", f"{np.mean(rep['secs_per_seed']) / 60:.0f}")
+for k, bands, lab in (("splitnn_all", 13, "SplitNN, our recipe, scratch"), ("splitnn_rgb", 3, "SplitNN, our recipe, scratch"), ("splitnn_rgb_pt", 3, "SplitNN, our recipe, ImageNet init.")):
+    b = base[k]
+    if b:
+        rows.append(row(lab, bands, size(4 * K * 512 * b["epochs"]), None, np.mean(b["secs_per_seed"]) / 60, b["summary"]))
+rows.append("\\midrule")
+rows.append("\\multicolumn{8}{@{}l}{\\emph{One-shot, party-side self-supervised training (FedOnce)}}\\\\")
+for k, bands, lab in (("nat_all", 13, "FedOnce (Noise As Targets)"), ("ssl_all", 13, "FedOnce, SimCLR variant"), ("ssl_rgb", 3, "FedOnce, SimCLR variant")):
+    b = base[k]
+    if b:
+        rows.append(row(lab, bands, size(K * b.get("feature_dim", 512) * 2), None, b["ssl_pretrain_secs_all_parties"] / 60, b["summary"]))
+rows.append("\\midrule")
+rows.append("\\multicolumn{8}{@{}l}{\\emph{One-shot, frozen foundation features (this work), MLP head}}\\\\")
+for k in ("dinov2_g_224", "clip_l14_224", "dinov2_b_224", "clip_b16_224", "ssl4eo_s2_vits16"):
+    h = heads224.get(k)
+    if k == "ssl4eo_s2_vits16" and not h and isinstance(Eold.get("E6_ssl4eo"), dict):
+        h = {"dim": Eold["E6_ssl4eo"]["dim"], "mlp2": Eold["E6_ssl4eo"]["mlp2"]}
+    if not h:
+        continue
+    c = cost.get(k, {})
+    gf = c.get("flops_per_image")
+    rows.append(row(NAME[k], 13 if "ssl4eo" in k else 3, size(K * h["dim"] * 2), gf / 1e9 if gf else None,
+                    c.get("extract_secs_all_images") / 60 if c.get("extract_secs_all_images") else None, h["mlp2"]))
+rows.append("\\midrule")
+maj = (Eg.get("E5_paired") or {}).get("majority_acc") or (Eold.get("E5_paired") or {}).get("majority_acc")
+if maj:
+    rows.append(f"Majority class & -- & -- & -- & -- & {maj:.1f} & -- & -- \\\\")
+    macro("majVB", f1(maj))
+write("tab_main.tex", "\n".join(rows))
+for k, m in (("dinov2_g_224", "G"), ("clip_l14_224", "Clip"), ("clip_b16_224", "ClipB"), ("dinov2_b_224", "DinoB"), ("dinov2_s_224", "DinoS")):
+    h = heads224.get(k)
+    if h:
+        macro(f"vb{m}Acc", f1(h["mlp2"]["acc"]))
+        macro(f"vb{m}Lin", f1(h["linear"]["acc"]))
+        if k in cost:
+            macro(f"vb{m}Min", f"{cost[k]['extract_secs_all_images'] / 60:.1f}")
+            macro(f"vb{m}GF", f"{cost[k]['flops_per_image'] / 1e9:.0f}")
+if r18:
+    macro("rEighteenGF", f"{r18 / 1e9:.1f}")
+    macro("rEighteenTrainGF", f"{3 * r18 * 50 / 1e9:.0f}")
+for k, m in (("splitnn_rgb_pt", "splitPT"), ("nat_all", "nat"), ("ssl_all", "sslAll"), ("splitnn_all", "splitAll"), ("splitnn_rgb", "splitRGB")):
+    if base[k]:
+        macro(f"{m}Acc", f1(base[k]["summary"]["acc"]))
+        secs = base[k].get("ssl_pretrain_secs_all_parties") or np.mean(base[k].get("secs_per_seed", [0]))
+        macro(f"{m}Min", f"{secs / 60:.0f}")
+
+# encoder table (VertiBench, 224 px)
+rows = []
+for k in ("dinov2_g_224", "dinov2_l_224", "dinov2_b_224", "dinov2_s_224", "clip_l14_224", "clip_b16_224", "siglip_b16_224", "resnet50_in1k_224", "dinov2_b_random_224"):
+    h = heads224.get(k)
+    if not h:
+        continue
+    c = cost.get(k, {})
+    rows.append(f"{NAME[k]} & {c.get('params', 0) / 1e6:.0f} & {c.get('flops_per_image', 0) / 1e9:.0f} & {h['dim']} & {pm(h['mlp2'])} & {pm(h['mlp2'], 'f1')} & {pm(h['linear'])} \\\\")
+write("tab_encoders.tex", "\n".join(rows))
+
+# ------------------------------------------------------------------ classic benchmarks vs published numbers
+PUB = {  # (dataset, protocol): list of (method, number)
+    ("cifar10", "K=2 top/bottom"): [("VFLAIR, splitVFL (ResNet-18, 30 ep.)", 79.8)],
+    ("cifar10", "K=4 quadrants"): [("VFLAIR, splitVFL", 76.2), ("FedOnce, one-shot", 58.7), ("SplitNN (FedOnce paper)", 68.3)],
+    ("cifar100", "K=2 top/bottom"): [("VFLAIR, splitVFL", 42.3)],
+    ("cifar100", "K=4 quadrants"): [("VFLAIR, splitVFL", 38.2)],
+    ("modelnet40", "K=4 (3 views/party, local mean)"): [("VIMADMM (ResNet-18)", 91.3), ("split learning (VIMADMM paper)", 90.0)],
+}
+DSN = {"cifar10": "CIFAR-10", "cifar100": "CIFAR-100", "modelnet40": "ModelNet40"}
+rows = []
+for (ds, proto), pubs in PUB.items():
+    r = cls.get(ds, {})
+    g, c = r.get("dinov2_g", {}).get(f"{proto}|mlp2"), r.get("clip_l14", {}).get(f"{proto}|mlp2")
+    pub = "; ".join(f"{m} {v:.1f}" for m, v in pubs)
+    rows.append(f"{DSN[ds]} & {proto.replace('K=', '$K{=}$')} & {pub} & {pm(g)} & {pm(c)} \\\\")
+r = cls.get("modelnet40", {})
+if r:
+    for proto in ("K=12 (1 view/party)", "solo 1 view"):
+        g, c = r.get("dinov2_g", {}).get(f"{proto}|mlp2"), r.get("clip_l14", {}).get(f"{proto}|mlp2")
+        rows.append(f"ModelNet40 & {proto.replace('K=', '$K{=}$')} & -- & {pm(g)} & {pm(c)} \\\\")
+for ds in ("cifar10", "cifar100"):
+    r = cls.get(ds, {})
+    for proto in ("solo bottom half", "solo quadrant", "centralised (full image)"):
+        g, c = r.get("dinov2_g", {}).get(f"{proto}|mlp2"), r.get("clip_l14", {}).get(f"{proto}|mlp2")
+        if g or c:
+            rows.append(f"{DSN[ds]} & {proto} & -- & {pm(g)} & {pm(c)} \\\\")
+write("tab_classic.tex", "\n".join(rows))
+SUN = {256: (78.2, 80.4), 512: (81.1, 84.1), 1024: (85.3, 86.4), 2048: (86.1, 87.5)}
+rows = []
+for n, (one, few) in SUN.items():
+    g = cls.get("cifar10", {}).get("dinov2_g", {}).get(f"aligned {n} left/right|mlp2")
+    c = cls.get("cifar10", {}).get("clip_l14", {}).get(f"aligned {n} left/right|mlp2")
+    rows.append(f"{n} & {one:.1f} & {few:.1f} & {pm(g)} & {pm(c)} \\\\")
+    if g:
+        macro(f"sun{ {256: 'A', 512: 'B', 1024: 'C', 2048: 'D'}[n] }".replace(" ", ""), f1(g["acc"]))
+write("tab_sun.tex", "\n".join(rows))
+for ds in ("cifar10", "cifar100"):
+    for e in ("dinov2_g", "clip_l14"):
+        for proto, t in (("K=2 top/bottom", "Two"), ("K=4 quadrants", "Four"), ("centralised (full image)", "Cent")):
+            s = cls.get(ds, {}).get(e, {}).get(f"{proto}|mlp2")
+            if s:
+                macro(f"{ {'cifar10': 'cTen', 'cifar100': 'cHun'}[ds] }{ {'dinov2_g': 'G', 'clip_l14': 'C'}[e] }{t}".replace(" ", ""), f1(s["acc"]))
+mn = cls.get("modelnet40", {})
+for e, t in (("dinov2_g", "G"), ("clip_l14", "C")):
+    for proto, p in (("K=4 (3 views/party, local mean)", "Four"), ("K=12 (1 view/party)", "Twelve"), ("solo 1 view", "Solo")):
+        s = mn.get(e, {}).get(f"{proto}|mlp2")
+        if s:
+            macro(f"mn{t}{p}", f1(s["acc"]))
+
+# ------------------------------------------------------------------ MILK10k
+MCFG = [("clin", "clinical photo (A)"), ("derm", "dermoscopy (B)"), ("meta", "metadata (C)"), ("clin+derm", "A + B"), ("derm+meta", "B + C"),
+        ("clin+derm+meta", "A + B + C"), ("derm halves", "dermoscopy, left + right halves"), ("derm left", "dermoscopy, left half only"),
+        ("clin halves", "clinical, left + right halves")]
+MENC = [("dinov2_g", "DINOv2-g"), ("clip_l14", "CLIP-L"), ("biomedclip", "BiomedCLIP"), ("monet", "MONET")]
+if milk:
+    encs = [(e, n) for e, n in MENC if e in milk]
+    rows = []
+    for c, lab in MCFG:
+        cells = []
+        for e, _ in encs:
+            s = milk[e].get(f"{c}|mlp2|bal") or (milk[MENC[0][0]].get(f"{c}|mlp2|bal") if c == "meta" else None)
+            cells.append(pm(s, "f1"))
+        rows.append(f"{lab} & " + " & ".join(cells) + " \\\\")
+        if c in ("derm", "clin+derm+meta"):
+            rows.append("\\midrule")
+    write("tab_milk.tex", "\n".join(rows))
+    write("tab_milk_head.tex", " & ".join(n for _, n in encs))
+    macro("milkNcols", str(len(encs)))
+    for e, t in (("dinov2_g", "G"), ("clip_l14", "C"), ("biomedclip", "B"), ("monet", "M")):
+        if e not in milk:
+            continue
+        for c, tc in (("clin", "Clin"), ("derm", "Derm"), ("clin+derm", "Both"), ("clin+derm+meta", "All"), ("derm halves", "Halves"), ("derm+meta", "DermMeta")):
+            s = milk[e].get(f"{c}|mlp2|bal")
+            if s:
+                macro(f"milk{t}{tc}", f1(s["f1"]))
+                macro(f"milk{t}{tc}Acc", f1(s["acc"]))
+                macro(f"milk{t}{tc}Bacc", f1(s["bacc"]))
+        s0, s1 = milk[e].get("clin+derm|mlp2|plain"), milk[e].get("clin+derm|linear|bal")
+        if s0:
+            macro(f"milk{t}BothPlain", f1(s0["f1"]))
+        if s1:
+            macro(f"milk{t}BothLin", f1(s1["f1"]))
+    s = milk.get("dinov2_g", {}).get("meta|mlp2|bal")
+    if s:
+        macro("milkMeta", f1(s["f1"]))
+    macro("milkN", f"{milk['n_lesions']:,}".replace(",", "{,}"))
+    cc = milk["class_counts"]
+    macro("milkBCC", f1(100 * cc[0] / sum(cc)))
+# price of freezing (MILK10k, clinical + dermoscopic)
+FZ = [("resnet18", "ResNet-18, scratch", "split"), ("resnet18_in", "ResNet-18, ImageNet", "split"), ("dinov2_b_lora", "DINOv2-B, LoRA", "split"),
+      ("dinov2_b_ft", "DINOv2-B, fine-tuned", "split"), ("clip_b16_lora", "CLIP-B, LoRA", "split"),
+      ("dinov2_b", "DINOv2-B, frozen", "frozen"), ("clip_b16", "CLIP-B, frozen", "frozen"), ("dinov2_g", "DINOv2-g, frozen", "frozen"), ("clip_l14", "CLIP-L, frozen", "frozen")]
+if msplit or milk:
+    rows = []
+    for k, lab, kind in FZ:
+        if kind == "split":
+            s = msplit.get(k)
+            if not s:
+                continue
+            rows.append(f"{lab} & split & {s['trainable_params'] / 1e6:.1f}\\,M & {size(s['bytes_per_train_sample'])} & {np.mean(s['secs_per_fold']) / 60:.1f} & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
+            macro(f"fz{k.replace('_', '').replace('18', 'Eighteen').replace('16', 'Sixteen')}", f1(s["f1"]))
+        else:
+            s = (milk or {}).get(k, {}).get("clin+derm|mlp2|bal")
+            if not s:
+                continue
+            if rows and rows[-1] != "\\midrule" and k == "dinov2_b":
+                rows.append("\\midrule")
+            d = {"dinov2_b": 768, "clip_b16": 768, "dinov2_g": 1536, "clip_l14": 1024}[k]
+            rows.append(f"{lab} & one-shot & 2.0\\,M & {size(2 * d * 2)} & -- & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
+            macro(f"fz{k.replace('_', '').replace('16', 'Sixteen').replace('14', 'Fourteen')}", f1(s["f1"]))
+    write("tab_freeze.tex", "\n".join(rows))
+
+# ------------------------------------------------------------------ WorldStrat: sensors, labels, resolution
+if ws:
+    TASKS = [("ipcc", "IPCC land cover (7)"), ("smod", "degree of urbanisation (8)"), ("lccs", "LCCS land cover (18)")]
+    GS = ["1.5m", "3m", "6m", "10m"]
+    gx = [1.5, 3, 6, 10]
+    fig, axs = plt.subplots(1, 3, figsize=(6.8, 2.3), sharex=True)
+    for ax, (t, lab) in zip(axs, TASKS):
+        r = ws.get(t, {})
+        for cfg, col, ls, l in (("SPOT {g}", C["blue"], "-", "SPOT alone"), ("SPOT {g} + S2 MS", C["green"], "-", "SPOT + S2 (RGB, NIR, SWIR)"),
+                                ("SPOT {g} + S2 RGB", C["orange"], "--", "SPOT + S2 (RGB)")):
+            pts = [(x, r.get(cfg.format(g=g) + "|mlp2")) for x, g in zip(gx, GS)]
+            pts = [(x, s["f1"], sd(s, "f1")) for x, s in pts if s]
+            if pts:
+                ax.errorbar([p[0] for p in pts], [p[1] for p in pts], yerr=[p[2] for p in pts], marker="o", ms=2.5, capsize=1.5, color=col, ls=ls, lw=1, label=l)
+        for cfg, col, l in (("S2 MS", C["green"], "S2 alone (RGB, NIR, SWIR)"), ("S2 RGB", C["orange"], "S2 alone (RGB)")):
+            s = r.get(cfg + "|mlp2")
+            if s:
+                ax.axhline(s["f1"], color=col, ls=":", lw=0.9, label=l)
+        ax.set_xscale("log")
+        ax.set_xticks(gx)
+        ax.set_xticklabels(["1.5", "3", "6", "10"])
+        ax.set_xlabel("SPOT ground sampling (m)")
+        ax.set_title(lab, fontsize=7)
+    axs[0].set_ylabel("macro F1 (%)")
+    axs[0].legend(frameon=False, fontsize=5, loc="lower left")
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUT, "fig_ws.pdf"))
+    plt.close(fig)
+    WCFG = [("SPOT 1.5m", "SPOT, 1.5\\,m (A)"), ("SPOT 10m", "SPOT, degraded to 10\\,m"), ("S2 RGB", "Sentinel-2, RGB (B)"), ("S2 MS", "Sentinel-2, RGB + NIR + SWIR"),
+            ("S2 SSL4EO", "Sentinel-2, SSL4EO (13 bands)"), ("SPOT 1.5m + S2 RGB", "A + B (RGB)"), ("SPOT 1.5m + S2 MS", "A + B (RGB, NIR, SWIR)"),
+            ("SPOT 1.5m + S2 SSL4EO", "A + B (SSL4EO)"), ("SPOT 10m + S2 MS", "A at 10\\,m + B (RGB, NIR, SWIR)"), ("SPOT CLIP-L", "SPOT, CLIP-L 224\\,px"),
+            ("SPOT CLIP-L + S2 CLIP-L", "A + B, CLIP-L")]
+    rows = []
+    for c, lab in WCFG:
+        cells = [pm(ws.get(t, {}).get(c + "|mlp2"), "f1") for t, _ in TASKS]
+        if all(x == "--" for x in cells):
+            continue
+        rows.append(f"{lab} & " + " & ".join(cells) + " \\\\")
+        if c in ("S2 SSL4EO", "SPOT 10m + S2 MS"):
+            rows.append("\\midrule")
+    write("tab_ws.tex", "\n".join(r for i, r in enumerate(rows) if not (r == "\\midrule" and i == len(rows) - 1)))
+    for t, tt in (("ipcc", "Ipcc"), ("smod", "Smod"), ("lccs", "Lccs")):
+        r = ws.get(t, {})
+        for c, tc in (("SPOT 1.5m", "Spot"), ("SPOT 10m", "SpotTen"), ("S2 RGB", "Srgb"), ("S2 MS", "Sms"), ("SPOT 1.5m + S2 MS", "Fus"), ("SPOT 1.5m + S2 RGB", "FusRgb"),
+                       ("SPOT 10m + S2 MS", "FusTen"), ("SPOT 6m + S2 MS", "FusSix"), ("SPOT 6m", "SpotSix"), ("S2 SSL4EO", "Sssl")):
+            s = r.get(c + "|mlp2")
+            if s:
+                macro(f"ws{tt}{tc}", f1(s["f1"]))
+        if "counts" in r:
+            macro(f"ws{tt}N", f"{sum(r['counts']):,}".replace(",", "{,}"))
+
+# ------------------------------------------------------------------ WorldStrat: making the second party help (s16)
+wf = load("ws_fusion.json")
+if wf:
+    FT = [("ipcc", "IPCC"), ("lccs", "LCCS"), ("smod", "SMOD")]
+    FR = [("SPOT|mlp2", "SPOT alone", "--"), ("S2 mean|mlp2", "S2 alone, mean of revisits", "1"), ("S2 clear-mean|mlp2", "S2 alone, mean of 8 clearest", "1"),
+          ("S2 set16|set attn", "S2 alone, 16 revisits, shared-weight set head", "16"), None,
+          ("SPOT + S2 mean|concat", "concat MLP, S2 mean", "1"), ("SPOT + S2 median|concat", "concat MLP, S2 median", "1"),
+          ("SPOT + S2 clear-mean|concat", "concat MLP, S2 clearest mean", "1"), ("SPOT + S2 mean+std|concat", "concat MLP, S2 mean + temporal std", "2"),
+          ("SPOT + S2 clear-mean|pca256 concat", "PCA-256 per party + concat MLP", "1"), ("SPOT + S2 clear-mean|late fusion", "late fusion (log-prob.\\ average)", "1"),
+          ("SPOT + S2 clear-mean|branch aux md0.0", "branches + auxiliary losses", "1"), ("SPOT + S2 clear-mean|branch aux md0.3", "branches + aux.\\ losses + modality dropout", "1"),
+          ("SPOT + S2 set16|set attn", "SPOT + shared-weight set head (16 revisits)", "16"), ("SPOT + S2 set8 clear|set attn", "SPOT + set head (8 clearest)", "8"), None,
+          ("SPOT centre|mlp2", "SPOT centre crop (336\\,m) alone", "--"), ("SPOT full+centre|mlp2", "SPOT full + centre", "--"),
+          ("S2 centre clear-mean|mlp2", "S2 centre crop alone, clearest mean", "1"),
+          ("SPOT full+centre + S2 centre clear-mean|concat", "full + centre, concat MLP", "1"), ("SPOT full+centre + S2 centre clear-mean|late fusion", "full + centre, late fusion", "1"),
+          ("SPOT full+centre + S2 centre clear-mean|branch aux md0.3", "full + centre, branches + modality dropout", "1"),
+          ("SPOT full+centre + S2 centre set8 clear|set attn", "full + centre, set head (8 clearest)", "8")]
+    rows = []
+    for r in FR:
+        if r is None:
+            if rows and rows[-1] != "\\midrule":
+                rows.append("\\midrule")
+            continue
+        key, lab, up = r
+        cells = [pm(wf.get(t, {}).get(key), "f1") for t, _ in FT]
+        if all(c == "--" for c in cells):
+            continue
+        rows.append(f"{lab} & {up} & " + " & ".join(cells) + " \\\\")
+    write("tab_wsfusion.tex", "\n".join(rows))
+    for t, tt in FT:
+        r = wf.get(t, {})
+        for key, tag in (("SPOT|mlp2", "Spot"), ("SPOT + S2 mean|concat", "Cat"), ("SPOT + S2 clear-mean|concat", "CatClear"), ("SPOT + S2 mean+std|concat", "CatStd"),
+                         ("SPOT + S2 clear-mean|late fusion", "Late"), ("SPOT + S2 clear-mean|branch aux md0.3", "Branch"), ("SPOT + S2 set16|set attn", "Set"),
+                         ("SPOT + S2 set8 clear|set attn", "SetClear"), ("S2 set16|set attn", "SolSet"), ("S2 mean|mlp2", "SolMean"), ("S2 clear-mean|mlp2", "SolClear"),
+                         ("SPOT full+centre|mlp2", "SpotFC"), ("SPOT centre|mlp2", "SpotC"), ("SPOT full+centre + S2 centre clear-mean|concat", "FCCat"),
+                         ("SPOT full+centre + S2 centre clear-mean|late fusion", "FCLate"), ("SPOT full+centre + S2 centre set8 clear|set attn", "FCSet")):
+            s = r.get(key)
+            if s:
+                macro(f"wf{tt.capitalize()}{tag}", f1(s["f1"]))
+        best = max(((k, v["f1"]) for k, v in r.items() if isinstance(v, dict) and "f1" in v and "+" in k), key=lambda kv: kv[1], default=None)
+        if best:
+            macro(f"wf{tt.capitalize()}BestFus", f1(best[1]))
+        d = r.get("diag SPOT vs S2 clear-mean") or r.get("diag SPOT vs S2 mean")
+        if d:
+            for k2, tag in (("err_a", "ErrA"), ("err_b", "ErrB"), ("both_wrong", "Both"), ("oracle_acc", "Oracle"), ("both_wrong_if_independent", "Indep")):
+                macro(f"wf{tt.capitalize()}{tag}", f1(d[k2]))
+
+# ------------------------------------------------------------------ compression (Pareto, validation-selected points) at 224 px
+par = Eg.get("E7_pareto_val") if isinstance(Eg.get("E7_pareto_val"), list) else None
+D = 1536
+if par:
+    fig, ax = plt.subplots(figsize=(4.8, 3.0))
+    cols = {16: C["blue"], 8: C["green"], 4: C["orange"], 2: C["red"], 1: C["grey"]}
+    for bits in [16, 8, 4, 2, 1]:
+        pts = sorted([(p["bytes_per_sample"], p["acc"], sd(p, "acc"), p["d"]) for p in par if p["bits"] == bits])
+        if pts:
+            ax.errorbar([p[0] for p in pts], [p[1] for p in pts], yerr=[p[2] for p in pts], marker="o", ms=3, lw=1, capsize=1.5, color=cols[bits], label=f"{bits}-bit" + (" float" if bits == 16 else ""))
+            if bits == 16:
+                for p in pts:
+                    ax.annotate(f"{p[3]}", (p[0], p[1]), fontsize=5, xytext=(0, 4), textcoords="offset points", ha="center", color=C["blue"])
+    refs = [(81.17, "SplitNN, published (13 bands)", "--")]
+    for yv, lab, ls in refs:
+        ax.axhline(yv, color=C["grey"], ls=ls, lw=0.8)
+        ax.text(1.2 * min(p["bytes_per_sample"] for p in par), yv + 0.12, lab, fontsize=5.5, color=C["grey"])
+    budgets = [256, 512, 2048, 16 * D * 2]
+    sel = {}
+    for B in budgets:
+        cand = [p for p in par if p["bytes_per_sample"] <= B]
+        best = max(cand, key=lambda p: p["val_acc"])
+        sel[B] = best
+        ax.scatter([best["bytes_per_sample"]], [best["acc"]], s=40, facecolors="none", edgecolors="k", lw=0.8, zorder=5)
+    ax.set_xscale("log", base=2)
+    ax.set_xticks([32, 128, 512, 2048, 8192, 16 * D * 2])
+    ax.set_xticklabels(["32 B", "128 B", "512 B", "2 KiB", "8 KiB", "48 KiB"])
+    ax.set_xlabel("one-time upload per sample, all 16 parties")
+    ax.set_ylabel("test accuracy (%)")
+    ax.legend(title="precision", ncol=3, frameon=False, loc="lower right", fontsize=6, title_fontsize=6)
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUT, "fig_pareto.pdf"))
+    plt.close(fig)
+    full = next(p for p in par if p["d"] == D and p["bits"] == 16)
+    macro("fullAcc", f1(full["acc"]))
+    for B, tag in zip(budgets, ("Two", "Five", "Twok", "Full")):
+        p = sel[B]
+        macro(f"sel{tag}Acc", f1(p["acc"]))
+        macro(f"sel{tag}Cfg", f"PCA-{p['d']}, {p['bits']}-bit" if p["d"] < D else f"{p['bits']}-bit")
+        macro(f"sel{tag}Bytes", size(p["bytes_per_sample"]))
+    rows = []
+    for p in sorted(par, key=lambda p: (-p["d"], -p["bits"])):
+        rows.append(f"{p['d']} & {p['bits']} & {size(p['bytes_per_sample'])} & {p['val_acc']:.1f} & {pm(p)} & {pm(p, 'auc')} \\\\")
+    write("tab_pareto.tex", "\n".join(rows))
+    look = {(p["d"], p["bits"]): p for p in par}
+    for (d, b), tag in (((64, 16), "PcaSf"), ((16, 16), "PcaSt"), ((256, 16), "PcaTf"), ((D, 1), "OneBit"), ((64, 4), "PcaSfFour")):
+        if (d, b) in look:
+            macro(f"cmp{tag}", f1(look[(d, b)]["acc"]))
+
+# ------------------------------------------------------------------ parties: subsets, missing parties (concat + imputation, pooling heads)
+e3, e2 = Eg.get("E3_parties"), Eg.get("E2_missing")
+if isinstance(e3, dict):
+    fig, axs = plt.subplots(1, 2, figsize=(6.6, 2.5))
+    ks = [s["k"] for s in e3["subsets"]]
+    axs[0].errorbar(ks, [s["acc"] for s in e3["subsets"]], yerr=[s["acc_std"] for s in e3["subsets"]], marker="o", ms=3, capsize=2, color=C["blue"], label="DINOv2-g")
+    e3c = Ec.get("E3_parties")
+    if isinstance(e3c, dict):
+        axs[0].errorbar([s["k"] for s in e3c["subsets"]], [s["acc"] for s in e3c["subsets"]], yerr=[s["acc_std"] for s in e3c["subsets"]], marker="s", ms=3, capsize=2, color=C["orange"], label="CLIP-L")
+        axs[0].legend(frameon=False, fontsize=6)
+    axs[0].set_xscale("log", base=2)
+    axs[0].set_xticks(ks)
+    axs[0].set_xticklabels(ks)
+    axs[0].set_xlabel("number of parties $k$ (random subsets)")
+    axs[0].set_ylabel("test accuracy (%)")
+    if isinstance(e2, list):
+        styles = {("0.0", "zero"): (C["grey"], "-", "concat, no dropout, zeros"), ("0.0", "train_mean"): (C["grey"], "--", "concat, no dropout, mean imputation"),
+                  ("0.25", "train_mean"): (C["orange"], "--", "concat, party dropout 0.25, mean imp."), ("0.5", "zero"): (C["green"], "-", "concat, party dropout 0.5, zeros")}
+        for (pd_, imp), (col, ls, lab) in styles.items():
+            pts = sorted([(m["missing_at_test"], m["acc"], sd(m, "acc")) for m in e2 if f"{m['train_party_dropout']:g}" == f"{float(pd_):g}" and (m["imputation"] == imp or m["missing_at_test"] == 0)])
+            if pts:
+                axs[1].errorbar([p[0] for p in pts], [p[1] for p in pts], yerr=[p[2] for p in pts], marker="o", ms=2.5, capsize=1.5, color=col, ls=ls, label=lab, lw=1)
+    if pool:
+        pts = sorted([(m["missing_at_test"], m["acc"], sd(m, "acc")) for m in pool["missing"] if m["arch"] == "mean"])
+        if pts:
+            axs[1].errorbar([p[0] for p in pts], [p[1] for p in pts], yerr=[p[2] for p in pts], marker="D", ms=2.5, capsize=1.5, color=C["blue"], lw=1.2, label="mean-pooling head (no imputation)")
+            for m, a, _ in pts:
+                macro(f"poolMiss{ {0: 'None', 4: 'Four', 8: 'Eight', 12: 'Twelve', 15: 'Fifteen'}[m] }".replace(" ", ""), f1(a))
+    axs[1].set_xlabel("parties missing at inference (of 16)")
+    axs[1].legend(frameon=False, fontsize=5, loc="lower left")
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUT, "fig_parties.pdf"))
+    plt.close(fig)
+    for s in e3["subsets"]:
+        macro(f"partiesK{ {1: 'One', 2: 'Two', 4: 'Four', 8: 'Eight', 16: 'All'}[s['k']] }".replace(" ", ""), f1(s["acc"]))
+    solo = [s["acc"] for s in e3["solo"]]
+    macro("soloMean", f1(np.mean(solo)))
+    macro("soloMin", f1(min(solo)))
+    macro("soloMax", f1(max(solo)))
+    if isinstance(e2, list):
+        get = lambda p, m, imp: next((x for x in e2 if abs(x["train_party_dropout"] - p) < 1e-9 and x["missing_at_test"] == m and (x["imputation"] == imp or m == 0)), None)  # noqa: E731
+        for p, tp in ((0.0, "Zero"), (0.25, "Q"), (0.5, "H")):
+            for m, tm in ((8, "Eight"), (12, "Twelve")):
+                for imp, ti in (("zero", "Z"), ("train_mean", "M")):
+                    x = get(p, m, imp)
+                    if x:
+                        macro(f"miss{tp}{tm}{ti}", f1(x["acc"]))
+if pool:
+    for k, t in (("dinov2_g_224/mlp2", "GConcat"), ("dinov2_g_224/mean", "GMean"), ("dinov2_g_224/attention", "GAtt"), ("clip_l14_224/mlp2", "CConcat"),
+                 ("clip_l14_224/mean", "CMean"), ("dinov2_g_224_pca64/mean", "GPcaMean"), ("dinov2_g_224_pca64/mlp2", "GPcaConcat")):
+        s = pool["official"].get(k)
+        if s:
+            macro(f"pool{t}", f1(s["acc"]))
+
+# ------------------------------------------------------------------ privacy at 224 px
+e4 = Eg.get("E4_dp")
+if inv and "single" in inv:
+    accmap = {}
+    if par:
+        look = {(p["d"], p["bits"]): p for p in par}
+        for name, key in (("full, 16-bit", (D, 16)), ("full, 8-bit", (D, 8)), ("full, 4-bit", (D, 4)), ("full, 1-bit", (D, 1)),
+                          ("PCA-256", (256, 16)), ("PCA-64", (64, 16)), ("PCA-16", (16, 16)), ("PCA-64, 4-bit", (64, 4)), ("PCA-16, 4-bit", (16, 4))):
+            if key in look:
+                accmap[name] = (look[key], size(look[key]["bytes_per_sample"]))
+    if isinstance(e4, list):
+        for r in e4:
+            if r["d"] == D and r["eps_upload"]:
+                accmap[f"DP eps={r['eps_upload']}"] = (r, size(16 * D * 2))
+    if "clip_l14_224" in heads224:
+        accmap["CLIP-L, full, 16-bit"] = (heads224["clip_l14_224"]["mlp2"], size(16 * 1024 * 2))
+    rows = []
+    order = ["full, 16-bit", "full, 8-bit", "full, 4-bit", "full, 1-bit", "PCA-256", "PCA-64", "PCA-16", "PCA-64, 4-bit", "PCA-16, 4-bit", "noise rho=1", "noise rho=3", "DP eps=64", "DP eps=8", "CLIP-L, full, 16-bit"]
+    pretty = {"noise rho=1": "noise $\\rho=1$", "noise rho=3": "noise $\\rho=3$", "DP eps=64": "clip + noise, $\\varepsilon=64$", "DP eps=8": "clip + noise, $\\varepsilon=8$"}
+    for name in order:
+        r = inv["single"].get(name)
+        if not r:
+            continue
+        a = accmap.get(name)
+        j = inv.get("joint", {}).get(name)
+        ps = f"{r['psnr']:.1f}" + (f"\\,{{\\scriptsize$\\pm${np.std(r['psnr_seeds'], ddof=1):.1f}}}" if len(r.get("psnr_seeds", [])) > 1 else "")
+        rows.append(f"{pretty.get(name, name)} & {a[1] if a else '--'} & {pm(a[0]) if a else '--'} & {ps} & {r['ssim']:.2f} & {r['reid']['top1']:.1f} & " + (f"{j['psnr']:.1f}" if j else "--") + " \\\\")
+        if name in ("PCA-16", "DP eps=8", "noise rho=3", "full, 1-bit"):
+            rows.append("\\midrule")
+    rows.append("\\midrule")
+    rows.append(f"\\emph{{reference:}} mean training image & -- & -- & {inv['mean_image']['psnr']:.1f} & {inv['mean_image']['ssim']:.2f} & 0.0 & -- \\\\")
+    if "mean_colour_oracle" in inv:
+        mo = inv["mean_colour_oracle"]
+        rows.append(f"\\emph{{reference:}} each image's mean colour & -- & -- & {mo['psnr']:.1f} & {mo['ssim']:.2f} & {mo['reid']['top1']:.1f} & -- \\\\")
+    rows.append(f"\\emph{{reference:}} nearest training image & -- & -- & {inv['nearest_neighbour']['psnr']:.1f} & {inv['nearest_neighbour']['ssim']:.2f} & -- & -- \\\\")
+    rows = [r for i, r in enumerate(rows) if not (r == "\\midrule" and i + 1 < len(rows) and rows[i + 1] == "\\midrule")]
+    write("tab_privacy.tex", "\n".join(rows))
+    for name, tag in (("full, 16-bit", "Full"), ("PCA-64", "PCAsf"), ("PCA-16", "PCAst"), ("PCA-256", "PCAtf"), ("DP eps=8", "DPeight"), ("DP eps=64", "DPsf"),
+                      ("full, 1-bit", "Onebit"), ("CLIP-L, full, 16-bit", "Clip"), ("noise rho=3", "Noisethree")):
+        r = inv["single"].get(name)
+        if r:
+            macro(f"inv{tag}", f1(r["psnr"]))
+            macro(f"inv{tag}Reid", f1(r["reid"]["top1"]))
+        j = inv.get("joint", {}).get(name)
+        if j:
+            macro(f"inv{tag}Joint", f1(j["psnr"]))
+            macro(f"inv{tag}JointReid", f1(j["reid"]["top1"]) if "reid" in j else "--")
+    macro("invMean", f1(inv["mean_image"]["psnr"]))
+    macro("invNN", f1(inv["nearest_neighbour"]["psnr"]))
+    if "mean_colour_oracle" in inv:
+        macro("invColour", f1(inv["mean_colour_oracle"]["psnr"]))
+        macro("invColourReid", f1(inv["mean_colour_oracle"]["reid"]["top1"]))
+if isinstance(e4, list):
+    for r in e4:
+        tag = {D: "Full", 64: "Sf", 16: "St"}[r["d"]] + {None: "None", 64: "Ssf", 8: "Eight", 1: "One"}[r["eps_upload"]]
+        macro(f"dp{tag}", f1(r["acc"]))
+npz = os.path.join(RES, "vb224_inversion_examples.npz")
+if os.path.exists(npz) and inv:
+    z = np.load(npz)
+    cols = [("original", "original"), ("mean colour", None), ("nearest_neighbour", "nearest\ntraining image"), ("single__full_16-bit", "single upload,\nfull"),
+            ("joint__full_16-bit", "16 uploads,\nfull"), ("single__PCA-64", "single upload,\nPCA-64"), ("single__DP_eps8", "single upload,\nclip+noise $\\varepsilon$=8"),
+            ("single__CLIP-L_full_16-bit", "single upload,\nCLIP-L")]
+    cols = [(k, t) for k, t in cols if k == "mean colour" or k in z.files]
+    ex = [0, 1, 2, 3]
+    GAIN = 3.0
+    fig, axs = plt.subplots(len(ex), len(cols), figsize=(6.6, 0.95 * len(ex) + 0.35))
+    for j, (k, title) in enumerate(cols):
+        for i, e in enumerate(ex):
+            img = z["original"][e] if k == "mean colour" else z[k][e]
+            img = np.transpose(img, (1, 2, 0)).astype(float) / 255
+            if k == "mean colour":
+                img = np.broadcast_to(img.mean((0, 1), keepdims=True), img.shape)
+            axs[i, j].imshow(np.clip(img * GAIN, 0, 1))
+            axs[i, j].axis("off")
+        axs[0, j].set_title(title or k, fontsize=6)
+    fig.subplots_adjust(left=0.005, right=0.995, top=0.90, bottom=0.005, wspace=0.04, hspace=0.04)
+    fig.savefig(os.path.join(OUT, "fig_inversion.pdf"))
+    plt.close(fig)
+
+# ------------------------------------------------------------------ linear / encryption-friendly heads
+HEDS = [("vertibench/dinov2_g_224", "VertiBench, DINOv2-g", 16), ("vertibench/clip_l14_224", "VertiBench, CLIP-L", 16),
+        ("milk10k/dinov2_g", "MILK10k, DINOv2-g", 2), ("milk10k/clip_l14", "MILK10k, CLIP-L", 2),
+        ("worldstrat_ipcc_1.5m_S2MS", "WorldStrat IPCC, DINOv2-g", 2), ("cifar10_dinov2_g_topbottom", "CIFAR-10 top/bottom, DINOv2-g", 2)]
+rows = []
+for key, lab, k in HEDS:
+    r = he.get(key)
+    if not r:
+        continue
+    met = "f1" if r["metric"] == "f1" else "acc"
+    full = r.get("full", {})
+    p64, p16 = r.get("pca64", {}), r.get("pca16", {})
+    cells = [pm(full.get("mlp2"), met), pm(full.get("linear_softmax"), met), pm(full.get("ridge"), met) if "ridge" in full else "--",
+             pm(p64.get("mlp2"), met), pm(p64.get("ridge"), met), pm(p64.get("polylogistic"), met), pm(p16.get("ridge"), met)]
+    rows.append(f"{lab} & {'F1' if met == 'f1' else 'acc.'} & " + " & ".join(cells) + " \\\\")
+    t = key.replace("/", "").replace("_", "").replace("224", "").replace("dinov2g", "G").replace("clipl14", "C").replace("vertibench", "Vb").replace("milk10k", "Milk")
+    t = "".join(ch for ch in t if ch.isalpha())[:14]
+    for h, hd, tag in (("mlp2", full, "Mlp"), ("linear_softmax", full, "Lin"), ("ridge", p64, "RidgeSf"), ("polylogistic", p64, "PolySf"), ("mlp2", p64, "MlpSf"), ("ridge", p16, "RidgeSt")):
+        s = hd.get(h)
+        if s:
+            macro(f"he{t}{tag}", f1(s[met]))
+write("tab_he.tex", "\n".join(rows))
+hc = he.get("he_cost", {})
+for key, tag in (("milk10k/dinov2_g/pca64", "Milk"), ("vertibench/dinov2_g_224/pca16", "VbSt"), ("vertibench/dinov2_g_224/pca64", "VbSf")):
+    c = hc.get(key)
+    if c:
+        macro(f"hc{tag}Server", f"{c['extrapolated_secs_server'] / 60:.0f}")
+        macro(f"hc{tag}Enc", f"{c['extrapolated_secs_encrypt_per_party']:.0f}")
+        macro(f"hc{tag}Up", size(c["upload_bytes_per_party"]))
+        macro(f"hc{tag}Plain", size(c["plain_fp16_bytes_per_party"]))
+        macro(f"hc{tag}Err", f"{c['max_rel_error']:.0e}")
+        macro(f"hc{tag}CtCt", f"{c['secs_ctct_inner_product'] * 1000:.0f}")
+
+# ------------------------------------------------------------------ macros
+with open(os.path.join(OUT, "macros.tex"), "w") as f:
+    for k, v in sorted(MACROS.items()):
+        f.write(f"\\newcommand{{\\{k}}}{{{v}}}\n")
+print(len(MACROS), "macros")
