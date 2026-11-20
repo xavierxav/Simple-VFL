@@ -1,89 +1,106 @@
 \section{Results}\label{sec:results}
 
-\subsection{Frozen features versus trained baselines}\label{sec:exp-main}
+\subsection{Frozen features versus end-to-end training}\label{sec:exp-main}
 
 \begin{table}[t]
-\caption{VertiBench Satellite (16 parties, 4 classes, official test set of 785 samples). Upload: payload per sample over the 16 parties during training (float32; SplitNN: activations and gradients at every epoch). GPU: minutes on one A100-40GB for the party-side work (SplitNN: one training run; FedOnce-style: SimCLR pre-training of the 16 encoders; frozen encoders: forward pass over all training and test images of the 16 parties). Mean\,$\pm$\,std over 5 seeds.}\label{tab:main}
+\caption{VertiBench Satellite (16 parties, 4 classes, official test set of 785 samples). Upload: payload per training sample over the 16 parties (half precision; split learning: activations and gradients at every epoch). Time: minutes on one A100-40GB for the party-side work, data loading included (split learning: one training run; SimCLR: pre-training of the 16 encoders; frozen encoders: one forward pass over all training and test images of the 16 parties). Mean\,$\pm$\,sample std over 5 seeds (the test set is fixed).}\label{tab:main}
 \centering\scriptsize
-\setlength{\tabcolsep}{4pt}
+\setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{@{}lcrccr@{}}
 \toprule
-Method & Bands & Upload / sample & Acc. (\%) & AUC (\%) & GPU min\\
+Method & Bands & Upload / sample & Acc. (\%) & AUC (\%) & Time\\
 \midrule
 \inputtab{gen/tab_main.tex}
 \bottomrule
 \end{tabular}
 \end{table}
 
+\paragraph{The reference is reproduced.}
+Our re-implementation of the published VertiBench configuration reaches $\reproAcc\pm\reproStd$\,\% on the 13 bands after its last epoch, in line with the published $81.2\pm0.4$\,\% (picking the best epoch on the test set would give \reproBest\,\%). Our own split-learning recipe is weaker from scratch ($77.8$\,\% on 13 bands, $77.7$\,\% on RGB) and reaches \splitPTAcc\,\% with ImageNet-initialised bottoms on RGB; the SimCLR variant of FedOnce reaches $78.5$\,\% (13 bands) and $77.6$\,\% (RGB). For these trained-from-scratch baselines the ten extra bands change accuracy by less than one point (AUC: $+1.4$ for SplitNN).
+
+\paragraph{One upload of frozen RGB features.}
+With RGB input, no party-side training and a single upload, frozen DINOv2 ViT-g/14 reaches $84.2$\,\% at 224\,px and CLIP ViT-L/14 $85.2$\,\%. The difference between two independent accuracies on 785 samples has a 95\,\% interval of about $\pm3.9$ points: against the reproduced SplitNN, CLIP's $+4.2$ points are at the edge of significance and DINOv2-g's $+3.2$ are not, whereas both are clearly above our other baselines. ~PRETRAINING-SENTENCE~ The costs differ in nature: the reproduced SplitNN exchanges activations and gradients at every one of its 50 epochs (1.56\,MiB per training sample) and needs \reproMin{} A100-minutes per training run, to be paid again for every re-training; the frozen encoders need one forward pass of every image (\timeG{} A100-minutes for DINOv2-g over all parties, training and test images, \timeClip{} for CLIP), one upload of 32--48\,KiB per sample, and a head that trains in seconds. At equal input (RGB), the encoder pass costs about as much as one run of our faster split-learning recipe (\splitRGBMin{} minutes), but only once.
+
+\paragraph{A geographic task.}
+A random forest on the recovered coordinates reaches \locRFofficial\,\% on the official split, more than any image model: the provider label of VertiBench is largely a location label, and Table~\ref{tab:main} partly ranks how well each method recognises the region. The next section separates the two.
+
+\subsection{Why does CLIP beat DINOv2? Resolution and geography}\label{sec:exp-why}
+
 \begin{table}[t]
-\caption{Frozen backbones on VertiBench Satellite (RGB input, 16 parties, one-shot). \emph{1 view}: a single random party per sample (horizontal proxy). Mean\,$\pm$\,std over 5 seeds.}\label{tab:backbones}
+\caption{Frozen encoders on VertiBench: official split (5 seeds), nearest-neighbour geolocation of the test samples from their features (median error and share within 100\,km), and five-fold cross-validation of the pooled samples with recovered coordinates, random vs.\ spatial (test set changes with the fold). Accuracy and macro AUC in \%, mean\,$\pm$\,sample std.}\label{tab:encoders}
 \centering\scriptsize
-\setlength{\tabcolsep}{3.2pt}
-\begin{tabular}{@{}lrcccc@{}}
+\setlength{\tabcolsep}{2.4pt}
+\begin{tabular}{@{}lcrrcccc@{}}
 \toprule
-Backbone & $d$ & MLP Acc. & MLP AUC & Linear Acc. & 1 view Acc.\\
+ & Official & \multicolumn{2}{c}{Geolocation} & \multicolumn{2}{c}{Random 5-fold CV} & \multicolumn{2}{c}{Spatial 5-fold CV}\\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+Encoder & Acc. & km & $<$100\,km & Acc. & AUC & Acc. & AUC\\
 \midrule
-\inputtab{gen/tab_backbones.tex}
+\inputtab{gen/tab_encoders.tex}
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{One upload of frozen RGB features beats end-to-end training on 13 bands.}
-Table~\ref{tab:main} compares the three protocols on the same data. With three bands, no party-side training and a single upload, frozen DINOv2 ViT-g/14 features reach $82.7\pm0.6$\,\% accuracy (AUC $95.1$), and CLIP ViT-L/14 $85.3\pm0.6$\,\% (AUC $96.7$; better than DINOv2-g on all five seeds). Our full-resolution reruns on all 13 bands reach $77.8\pm0.8$\,\% for SplitNN and $78.5\pm0.7$\,\% for the FedOnce-style SimCLR protocol; restricted to RGB they reach $77.7\pm0.6$ and $77.6\pm1.3$\,\%: the ten extra bands bring the baselines less than one point. The published, tuned SplitNN ($81.2\pm0.4$\,\%) is closer: its gap to DINOv2-g is within the $\pm2.7$-point test-sampling interval, while the gaps to our reruns, trained with the same data, resolution and head, are not. The costs differ in nature. SplitNN needs one round of activations and gradients per mini-batch, i.e.\ 2.5\,MiB per training sample over 40 epochs, and 11 minutes of A100 per training run, to be paid again for every re-training; SimCLR needs 16 A100-minutes of local pre-training for the 16 parties. The frozen encoders only need forward passes (2.5 A100-minutes for DINOv2-g over all parties, training and test images, 1.4 for CLIP) and a one-time upload of 96\,KiB (DINOv2-g) or 64\,KiB (CLIP) per sample, which Sec.~\ref{sec:exp-pareto} reduces further; the head trains in about \headSecs{} seconds on an L4.
+Table~\ref{tab:encoders} tests three explanations of the CLIP--DINOv2 gap observed in our first extraction (85.2 vs.\ 82.6\,\%).
 
-\paragraph{Which encoder?}
-Table~\ref{tab:backbones} varies the frozen encoder under the same head. Accuracy grows with the size of DINOv2 (ViT-S $80.1$, ViT-B $80.9$, ViT-L $82.5$, ViT-g $82.7$\,\%), a supervised ImageNet ResNet-50 is on par with DINOv2-L ($82.1$\,\%), and CLIP is the best. A randomly initialised ViT-B already reaches $75.4$\,\%: coarse colour and texture statistics---and the region they betray, Sec.~\ref{sec:exp-ws}---carry much of the signal and bound what a pre-trained representation can add on this benchmark. A linear head loses only 0.7--1.8 points with respect to the MLP, so the gain lies in the representation rather than in the head. Feeding all 13 bands to DINOv2-g as four 3-band composites (four forward passes) changes accuracy by $+0.35$ points on average (from $-0.4$ to $+1.9$ per seed), well within noise: an RGB foundation model does not exploit the extra bands this way. Finally, a single party alone already reaches $79.1$\,\% on average (77.2--81.0\,\%), and a head trained and tested on one random revisit per sample $79.8$\,\%: the 16 parties are redundant views of the same scene by the same sensor, and fusing them adds 3.6 points over the average party.
+\paragraph{Input resolution explains most of it.}
+That extraction fed DINOv2 $168$-px images ($12\times12$ patches) and CLIP $224$-px images. At 224\,px, DINOv2-g gains 1.6 points ($84.2$\,\%; paired difference \pairGsvGlDiff{} points, McNemar $p=\pairGsvGlP$), whereas CLIP loses only 0.3 points at 168\,px; the remaining gap to CLIP is 1.0 point on the official split (paired: \pairCvGlDiff{} points, 95\,\% bootstrap interval [\pairCvGlLo, \pairCvGlHi], $p=\pairCvGlP$) and 0.1 point under random cross-validation. Concatenating the mean patch token to the class token adds 0.5 points. Resizing choices matter for remote-sensing benchmarks~\cite{corley2024resizing}, and they matter here more than the choice between the two best encoders. Image--text pre-training alone is not the answer either: SigLIP-B/16 ($81.6$\,\%) is below CLIP-B/16 ($84.4$\,\%).
 
+\paragraph{The features know where the images were taken.}
+Predicting the location of a test sample by that of its nearest training sample in feature space gives a median error of 569\,km with CLIP-L, 808\,km with DINOv2-g at 224\,px and 4{,}032\,km with random weights. Across the nine encoders, accuracy on the official split follows this geolocation ability almost monotonically (Spearman $\rho=\geoSpearman$), as expected for a geographic label, and CLIP features geolocate best, consistently with the strength of CLIP-based image geolocators~\cite{haas2023streetclip,haas2024pigeon,vivanco2023geoclip}.
+
+\paragraph{But they also carry more than location.}
+Under random cross-validation of the pooled samples, coordinates alone reach $91.4$\,\%, above every encoder ($75.8$--$86.0$\,\%). Under spatial cross-validation they fall to the level of the training majority class ($61.1$ vs.\ $60.6$\,\%, AUC $58.4$), whereas the frozen features keep $69$--$74$\,\% accuracy and $73$--$77$\,\% AUC (random weights: $63.6$\,\% and $64.0$). The spread across spatial folds is large (the majority class covers 44--88\,\% of a test fold), but within folds the ranking is stable: CLIP-L stays ahead of DINOv2-g at 224\,px ($+1.7$ points on all five folds, $+2.1$ AUC on three), so its small advantage is not only region recognition. The absolute accuracies of Table~\ref{tab:main}, however, overstate what any of these models would achieve in a new region by more than 10 points.
 
 \subsection{How little needs to be sent?}\label{sec:exp-pareto}
 
 \begin{figure}[t]
-\centering\includegraphics[width=0.72\linewidth]{gen/fig_pareto.pdf}
-\caption{Accuracy versus one-time upload (bytes per sample, 16 parties) for per-party PCA ($d'\in\{1536,\dots,16\}$, points from right to left within a curve) and uniform scalar quantisation. Frozen DINOv2 ViT-g/14, MLP head, mean\,$\pm$\,std over 5 seeds.}\label{fig:pareto}
+\centering\includegraphics[width=0.78\linewidth]{gen/fig_pareto.pdf}
+\caption{Accuracy versus one-time upload (bytes per sample, 16 parties) for per-party PCA (number of components $d'$ annotated on the 16-bit curve) and uniform scalar quantisation of frozen DINOv2-g features (168\,px), MLP head, mean\,$\pm$\,sample std over 5 seeds. Circles: configuration with the best \emph{validation} accuracy under a budget of 256\,B, 512\,B, 2\,KiB and 48\,KiB.}\label{fig:pareto}
 \end{figure}
 
-Figure~\ref{fig:pareto} shows that most of the 96\,KiB per sample are unnecessary. Uniform 4-bit quantisation of the 1536-d features costs nothing ($82.75$ vs.\ $82.73$\,\%), and one bit per coordinate (3\,KiB) costs 1.2 points. Per-party PCA \emph{improves} accuracy: with 256 or 512 components the head reaches $84.2$--$84.3$\,\% (AUC $95.4$--$95.5$), better than the full upload on all five seeds ($+1.4$ to $+1.6$ points); the projection removes directions on which the head would otherwise over-fit ($16\times1536$ inputs for 2.7k training samples). At 4 bits, PCA-256 needs 2\,KiB per sample ($84.2$\,\%) and PCA-64 512\,B ($83.4$\,\%, still better on all seeds); PCA-32 at 4 bits, 256\,B per sample, matches the full float32 upload ($82.5$\,\%), a $384\times$ reduction. Even 32\,B per sample (16 components, 1 bit, i.e.\ 16 bits per party) keep $77.4$\,\%, the level of our SplitNN rerun, which exchanges 2.5\,MiB per sample. Each party fits its PCA and quantiser on its own training features: the compression needs no coordination, no shared statistics, and the projection basis never leaves the party.
+~TEXT-PARETO~
 
 \subsection{Fewer parties, missing parties}\label{sec:exp-parties}
 
 \begin{figure}[t]
 \centering\includegraphics[width=\linewidth]{gen/fig_parties.pdf}
-\caption{Left: accuracy with $k$ randomly chosen parties (3 subsets $\times$ 3 seeds). Right: parties missing at inference (their upload replaced by zeros), for heads trained with and without party-level dropout.}\label{fig:parties}
+\caption{Left: accuracy with $k$ randomly chosen parties (3 subsets $\times$ 5 seeds). Right: parties missing at inference, replaced by zeros or by the training mean of the party, for heads trained with and without party-level dropout (5 seeds; DINOv2-g, 168\,px).}\label{fig:parties}
 \end{figure}
 
-Accuracy saturates quickly with the number of parties (Fig.~\ref{fig:parties}, left): one random party gives $79.7$\,\%, eight $82.6$\,\% and all sixteen $82.7$\,\%. A head trained with all parties is, however, fragile when parties are missing at inference (their upload replaced by zeros, right panel): it keeps $79.1$\,\% with 4 parties missing but falls to $66.3$\,\% with 8 and to $59.9$\,\% with 12, close to the majority-class rate. Party-level dropout during training (each party's vector is zeroed with probability $p$ and the others rescaled by $1/(1-p)$) removes most of this fragility at no cost when everybody is present: with $p=0.5$, $82.0$\,\% with all parties, $79.2$\,\% with 8 missing and $74.8$\,\% with 12 missing. Since the head is trained locally by the active party, this robustness costs no communication.
+~TEXT-PARTIES~
 
 \subsection{What does the upload leak?}\label{sec:exp-privacy}
 
 \begin{figure}[t]
 \centering\includegraphics[width=\linewidth]{gen/fig_inversion.pdf}
-\caption{Feature-inversion attack on held-out test images ($64\times64$ RGB thumbnails, four revisits of one test location; brightness $\times3$ for display, identical for all panels). From left to right: original; nearest training image in DINOv2-g feature space; decoder output from the full float32 upload, from its 1-bit quantisation, from PCA-64 and PCA-16 projections, and from the upload with Gaussian noise ($\rho=3$).}\label{fig:inversion}
+\caption{Inversion attack on held-out test images ($64\times64$ RGB thumbnails of four test locations, party 0; brightness $\times3$ for display, identical for all panels). From left to right: original; its mean colour; nearest training image in DINOv2-g feature space; decoder output from one full DINOv2-g upload, from the 16 uploads of the location, from a PCA-64 upload, from a clipped noisy upload ($\varepsilon=8$), and from one CLIP-L upload.}\label{fig:inversion}
 \end{figure}
 
 \begin{table}[t]
-\caption{Utility versus leakage of the upload format (DINOv2 ViT-g/14, 16 parties). Upload: bytes per sample; accuracy on the VertiBench test set; PSNR and SSIM of the inversion attack on the test uploads (higher = more leakage); $\varepsilon$: Gaussian-DP reading at $\delta=10^{-5}$ of the noisy uploads (Sec.~\ref{sec:attack}).}\label{tab:privacy}
+\caption{Utility versus leakage of the upload format (16 parties, 168-px DINOv2-g unless stated). Upload: bytes per sample; accuracy on the VertiBench test set (5 seeds); PSNR (3 decoder seeds for the full, PCA-64 and $\varepsilon=8$ rows) and SSIM of the single-upload attack; Re-id: share of test images whose reconstruction is closer to them than to any other of the 12.5k test images (chance: 0.01\,\%); Joint: PSNR of the attack that sees the 16 uploads of a location. Clip + noise: the Gaussian mechanism of Sec.~\ref{sec:method}, per-upload $(\varepsilon, 10^{-5})$.}\label{tab:privacy}
 \centering\scriptsize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}lrcccc@{}}
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lrccccc@{}}
 \toprule
-Upload format & Upload & Acc. (\%) & PSNR (dB) & SSIM & $\varepsilon$\\
+Upload format & Upload & Acc. (\%) & PSNR (dB) & SSIM & Re-id (\%) & Joint (dB)\\
 \midrule
 \inputtab{gen/tab_privacy.tex}
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:privacy} and Fig.~\ref{fig:inversion} report the inversion attack. From the full float32 upload, the decoder reaches 25.2\,dB PSNR on held-out test images, against 19.0\,dB for the mean training image and 21.2\,dB for the nearest training image in feature space. Figure~\ref{fig:inversion} shows what this means: the decoder recovers the global brightness and colour of an acquisition---which differ between revisits of the same location---but not its layout, while nearest-neighbour retrieval returns a sharp image of a similar but different place. Quantisation barely reduces leakage (4 bits: 25.1\,dB; 1 bit: 24.4\,dB). Per-party PCA does: with 16 to 256 components the reconstruction falls to 21.1--21.3\,dB, the level of nearest-neighbour retrieval, while accuracy \emph{increases} (Sec.~\ref{sec:exp-pareto}). Gaussian noise is a worse trade-off: $\rho=3$ costs six accuracy points and still leaves 22.5\,dB. The formal reading is unambiguous: with clipping at the median norm ($c=\clipC$), every noise level that keeps a useful accuracy corresponds to $\mu\geq39$, i.e.\ $\varepsilon>900$ at $\delta=10^{-5}$; $\varepsilon=8$ would require $\rho\approx\noiseForEpsEight$ and $\varepsilon=1$ $\rho\approx\noiseForEpsOne$, while accuracy is already down to $66.2$\,\% at $\rho=10$. A per-upload differential-privacy guarantee is therefore vacuous at useful accuracy; PCA is a cheap empirical mitigation against this attacker, not a guarantee.
+~TEXT-PRIVACY~
 
 \subsection{WorldStrat: two sensors, and what a random split hides}\label{sec:exp-ws}
 
 \begin{table}[t]
-\caption{WorldStrat, IPCC land cover (7 classes, 3{,}925 locations). Frozen DINOv2 ViT-g/14 features, MLP head. \emph{Random}: POI-grouped random split, 5 seeds, fixed test set of 589 locations. \emph{Spatial}: 5 geographically disjoint folds (each fold is the test set once). Accuracy and macro AUC in \%, mean\,$\pm$\,std. The majority class gives 43.3\,\% (random) and 48.4\,\% on average (spatial).}\label{tab:ws}
+\caption{WorldStrat, IPCC land cover (7 classes, 3{,}925 locations). Frozen DINOv2 ViT-g/14 features, MLP head. Five-fold cross-validation with random or spatial folds (each fold is the test set once). Accuracy and macro AUC in \%, mean\,$\pm$\,sample std over folds.}\label{tab:ws}
 \centering\scriptsize
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}lcccc@{}}
 \toprule
- & \multicolumn{2}{c}{random split} & \multicolumn{2}{c}{spatial split}\\
+ & \multicolumn{2}{c}{Random 5-fold CV} & \multicolumn{2}{c}{Spatial 5-fold CV}\\
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}
 Inputs & Acc. & AUC & Acc. & AUC\\
 \midrule
@@ -92,13 +109,4 @@ Inputs & Acc. & AUC & Acc. & AUC\\
 \end{tabular}
 \end{table}
 
-Under the random split, the image models reach 75--78\,\% accuracy on the IPCC label (Sentinel, 16 revisits: $77.35\pm0.51$\,\%); Table~\ref{tab:ws} adds what that protocol cannot show.
-
-\paragraph{The random split rewards geography.}
-A random forest that only sees longitude and latitude reaches $70.6$\,\% accuracy and $86.6$\,\% AUC under the random split, 27 points above the majority class and only 5--7 points below the image models: neighbouring locations share their land cover, and a random split puts neighbours on both sides. Under the spatial split the same model falls to $33.8\pm6.7$\,\% (AUC $58.4$), \emph{below} the majority-class rate on four folds out of five ($33.8$ against $48.4$\,\% on average), while the frozen image features lose only 2--5 points of accuracy (SPOT: $75.6\to73.8$\,\%, AUC $94.1\to88.8$). The image representation therefore transfers to regions that were never seen during training; the location shortcut does not. The fold-to-fold spread (SPOT: 65.6--81.9\,\%) is driven by the class mix of each region (the majority class covers 32--65\,\% of a fold) and dwarfs the differences between input combinations; we therefore compare combinations with paired differences on the same folds.
-
-\paragraph{Multi-sensor gains shrink in new regions.}
-Under the random split, concatenating SPOT with the 16 Sentinel revisits improves over SPOT alone on every seed ($+2.5$ accuracy points, $+0.55$ AUC). Under the spatial split this gain disappears ($-0.5$ points, better on 1 fold out of 5). The most robust one-shot fusion is also the simplest: SPOT concatenated with the \emph{average} of the Sentinel revisit features ($2\times1536$ inputs, no learned weighting, no selection on the test set) matches SPOT in accuracy and beats the Sentinel-only model in AUC on all five spatial folds ($+2.0$ points). A head twice as wide on SPOT alone does not change the results ($-0.03$ and $-1.1$ points), so the random-split fusion gain is not a capacity effect. Temporal depth helps consistently: 16 Sentinel revisits beat a single random revisit by $+4.1$ (random) and $+3.0$ (spatial) points, on every seed and fold. The 4-class simplified label shows the same pattern (tables in the repository).
-
-\paragraph{The provider label is a geographic label.}
-The \texttt{sources} label---the provider of the location, i.e.\ the label of VertiBench Satellite---is an extreme case. Under the random split, longitude and latitude alone ($91.4\pm0.3$\,\%, AUC $98.0$) beat every image model (best: SPOT\,+\,mean Sentinel, $88.9\pm0.7$\,\%, AUC $97.3$) on all five seeds. Under the spatial split, the location model falls to the majority-class level ($65.2$\,\% against $65.1$\,\%, AUC $60.5$), whereas the image models keep an AUC of 73--79\,\% (SPOT\,+\,mean Sentinel: $74.5\pm6.1$\,\%, AUC $78.7\pm2.1$). Providers cover different regions, and a random split rewards recognising the region. VertiBench Satellite uses this label with a random split; its parties see no coordinates, but images of neighbouring locations look alike, so absolute accuracies on it mix land-cover recognition with region recognition. The comparisons of Sec.~\ref{sec:exp-main}--\ref{sec:exp-privacy} share this label and split: they rank methods on that mixed task, which is why we complement them with the IPCC labels and the spatial protocol above.
+~TEXT-WS~

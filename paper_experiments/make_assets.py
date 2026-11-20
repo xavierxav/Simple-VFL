@@ -112,6 +112,14 @@ if bb or enc or any(base.values()):
             s = r["mlp2"]
             bands = 13 if "13 bands" in lab else 3
             rows.append(f"{lab} & {bands} & {size(16 * d * 2)} & {pm(s)} & {pm(s, 'auc')} & {frozen_time(tk) if tk else '--'} \\\\")
+    for k, m in (("splitnn_all", "splitAll"), ("splitnn_rgb", "splitRGB"), ("splitnn_rgb_pt", "splitPT"), ("ssl_all", "sslAll"), ("ssl_rgb", "sslRGB")):
+        b = base[k]
+        if b:
+            macro(m + "Acc", f"{b['summary']['acc']:.1f}")
+            macro(m + "Min", fmin((np.mean(b["secs_per_seed"]) if "secs_per_seed" in b else b["ssl_pretrain_secs_all_parties"]) / 60))
+    for k, m in (("dinov2_g", "timeG"), ("clip_l14", "timeClip"), ("dinov2_s", "timeS")):
+        if tim and k in tim:
+            macro(m, frozen_time(k))
     rows += ["\\midrule", grp("References")]
     e5 = E.get("E5_paired", {})
     if e5:
