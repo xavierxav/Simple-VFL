@@ -157,6 +157,17 @@ for k in ("dinov2_g_224", "dinov2_l_224", "dinov2_b_224", "dinov2_s_224", "clip_
     rows.append(f"{NAME[k]} & {c.get('params', 0) / 1e6:.0f} & {c.get('flops_per_image', 0) / 1e9:.0f} & {h['dim']} & {pm(h['mlp2'])} & {pm(h['mlp2'], 'f1')} & {pm(h['linear'])} \\\\")
 write("tab_encoders.tex", "\n".join(rows))
 
+combo = load("vb224_combo.json") or {}
+CN = {"dinov2_g_224": "DINOv2-g", "clip_l14_224": "CLIP-L", "clip_b16_224": "CLIP-B", "dinov2_b_224": "DINOv2-B"}
+rows = []
+for k, v in combo.items():
+    names = k.split("+")
+    gf = sum(cost.get(n, {}).get("flops_per_image", 0) for n in names) / 1e9
+    rows.append(f"{' + '.join(CN.get(n, n) for n in names)} (standardised) & {gf:.0f} & {v['dim']} & {pm(v['mlp2'])} & {pm(v['mlp2'], 'f1')} & {pm(v['linear'])} \\\\")
+    macro("combo" + "".join({"dinov2_g_224": "G", "clip_l14_224": "L", "clip_b16_224": "B", "dinov2_b_224": "D"}[n] for n in names), f1(v["mlp2"]["acc"]))
+if rows:
+    write("tab_combo.tex", "\n".join(rows))
+
 # ------------------------------------------------------------------ classic benchmarks vs published numbers
 PUB = {  # (dataset, protocol): list of (method, number)
     ("cifar10", "K=2 top/bottom"): [("VFLAIR, splitVFL (ResNet-18, 30 ep.)", 79.8)],
@@ -245,6 +256,27 @@ if milk:
     macro("milkN", f"{milk['n_lesions']:,}".replace(",", "{,}"))
     cc = milk["class_counts"]
     macro("milkBCC", f1(100 * cc[0] / sum(cc)))
+# MILK10k: how the label owner combines the parties (s17)
+mf = load("milk_fusion.json")
+if mf:
+    ENCF = [("dinov2_g", "DINOv2-g"), ("clip_l14", "CLIP-L"), ("monet", "MONET"), ("dinov2_g+clip_l14", "DINOv2-g + CLIP-L"), ("dinov2_g+monet", "DINOv2-g + MONET")]
+    rows = []
+    for e, lab in ENCF:
+        r = mf.get(e)
+        if not r:
+            continue
+        d = r.get("diag clin vs derm", {})
+        cells = [pm(r.get(k), "f1") for k in ("derm|concat", "clin+derm|concat", "clin+derm|late fusion", "clin+derm|branch aux md0.3", "clin+derm+meta|branch aux md0.3")]
+        rows.append(f"{lab} & " + " & ".join(cells) + (f" & {d['both_wrong']:.1f} ({d['both_wrong_if_independent']:.1f})" if d else " & --") + " \\\\")
+        t = {"dinov2_g": "G", "clip_l14": "C", "monet": "M", "dinov2_g+clip_l14": "GC", "dinov2_g+monet": "GM"}[e]
+        for k, tag in (("derm|concat", "Derm"), ("clin+derm|concat", "Cat"), ("clin+derm|late fusion", "Late"), ("clin+derm|branch aux md0.3", "Branch"),
+                       ("clin+derm+meta|branch aux md0.3", "BranchMeta"), ("clin+derm+meta|concat", "CatMeta")):
+            if k in r:
+                macro(f"mf{t}{tag}", f1(r[k]["f1"]))
+        if d:
+            for k2, tag in (("both_wrong", "Both"), ("both_wrong_if_independent", "Indep"), ("oracle_acc", "Oracle"), ("err_a", "ErrClin"), ("err_b", "ErrDerm")):
+                macro(f"mf{t}{tag}", f1(d[k2]))
+    write("tab_milkfusion.tex", "\n".join(rows))
 # price of freezing (MILK10k, clinical + dermoscopic)
 FZ = [("resnet18", "ResNet-18, scratch", "split"), ("resnet18_in", "ResNet-18, ImageNet", "split"), ("dinov2_b_lora", "DINOv2-B, LoRA", "split"),
       ("dinov2_b_ft", "DINOv2-B, fine-tuned", "split"), ("clip_b16_lora", "CLIP-B, LoRA", "split"),
