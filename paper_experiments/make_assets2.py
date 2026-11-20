@@ -181,7 +181,7 @@ for k, v in combo.items():
     if len(names) < 2:
         continue
     pp = sum(cost.get(n, {}).get("params", 0) for n in names) / 1e6
-    rows.append(f"{' + '.join(CN.get(n, n) for n in names)} & {pp:.0f} & {gf:.0f} & {v['dim']} & {pm(v['mlp2'])} & {pm(v['mlp2'], 'f1')} & {pm(v['linear'])} \\\\")
+    rows.append(f"{' + '.join(CN.get(n, n) for n in names)} & {pp:.0f} & {gf:.0f} & {v['dim']} & {pm(v['mlp2'])} & {pm(v['mlp2'], 'f1')} & -- \\\\")
     macro("combo" + "".join({"dinov2_g_224": "G", "clip_l14_224": "L", "clip_b16_224": "B", "dinov2_b_224": "D"}[n] for n in names), f1(v["mlp2"]["acc"]))
 if rows:
     write("tab_combo_enc.tex", "\n".join(rows))
@@ -334,6 +334,15 @@ if mr:
             if a and b:
                 macro(f"mr{t}Gap{tag}", f"{a['f1'] - b['f1']:+.1f}")
 
+for enc, t in (("dinov2_g", "G"), ("clip_l14", "C"), ("monet", "M")):
+    r = (load("milk_reg.json") or {}).get(enc, {})
+    a, b = r.get("late fusion (fixed 0.5)"), r.get("concat")
+    if a and b and "f1s" in a and "f1s" in b:
+        x = np.array(a["f1s"]) - np.array(b["f1s"])
+        macro(f"mr{t}PairD", f1(x.mean()))
+        macro(f"mr{t}PairS", f1(x.std(ddof=1)))
+        macro(f"mr{t}PairW", str(int((x > 0).sum())))
+
 # price of freezing (MILK10k, clinical + dermoscopic)
 FZ = [("resnet18", "ResNet-18, scratch", "split"), ("resnet18_in", "ResNet-18, ImageNet", "split"), ("dinov2_b_lora", "DINOv2-B, LoRA", "split"),
       ("dinov2_b_ft", "DINOv2-B, fine-tuned", "split"), ("clip_b16_lora", "CLIP-B, LoRA", "split"),
@@ -357,12 +366,16 @@ if msplit or milk:
                 rows.append("\\midrule")
             d = {"dinov2_b": 768, "clip_b16": 768, "dinov2_g": 1536, "clip_l14": 1024}[k]
             hp = (2 * d * 1000 + 1000 + 2 * 1000 + 1000 * 7 + 7) / 1e6  # MLP head: Linear(2d,1000)-BN-ReLU-Linear(1000,7)
-            rows.append(f"{lab} & one-shot & {hp:.1f}\\,M & {size(2 * d * 2)} & -- & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
+            ct = cost.get(k + "_224", {}).get("extract_secs_all_images")
+            tm = f"{ct / 62832 * 10480 / 60:.1f}" if ct else "--"
+            rows.append(f"{lab} & one-shot & {hp:.1f}\\,M & {size(2 * d * 2)} & {tm} & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
             macro(f"fz{k.replace('_', '').replace('16', 'Sixteen').replace('14', 'Fourteen')}", f1(s["f1"]))
     mrg = (load("milk_reg.json") or {}).get("dinov2_g", {}).get("late fusion (fixed 0.5)|views mean")
     if mrg:
         hp2 = 2 * (1536 * 1000 + 1000 + 2 * 1000 + 1000 * 7 + 7) / 1e6
-        rows.append(f"DINOv2-g, frozen, late fusion, 8 views & one-shot & {hp2:.1f}\\,M & {size(2 * 1536 * 2)} & -- & {pm(mrg, 'f1')} & {pm(mrg, 'bacc')} & {pm(mrg)} \\\\")
+        ct = cost.get("dinov2_g_224", {}).get("extract_secs_all_images")
+        tm = f"{8 * ct / 62832 * 10480 / 60:.1f}" if ct else "--"
+        rows.append(f"DINOv2-g, frozen, late fusion, 8 views & one-shot & {hp2:.1f}\\,M & {size(2 * 1536 * 2)} & {tm} & {pm(mrg, 'f1')} & {pm(mrg, 'bacc')} & {pm(mrg)} \\\\")
     write("tab_freeze.tex", "\n".join(rows))
 
 # ------------------------------------------------------------------ WorldStrat: sensors, labels, resolution
@@ -590,7 +603,7 @@ if inv and "single" in inv:
     if "clip_l14_224" in heads224:
         accmap["CLIP-L, full, 16-bit"] = (heads224["clip_l14_224"]["mlp2"], size(16 * 1024 * 2))
     rows = []
-    order = ["full, 16-bit", "full, 8-bit", "full, 4-bit", "full, 1-bit", "PCA-256", "PCA-64", "PCA-16", "PCA-64, 4-bit", "PCA-16, 4-bit", "noise rho=1", "noise rho=3", "DP eps=64", "DP eps=8", "CLIP-L, full, 16-bit"]
+    order = ["full, 16-bit", "full, 8-bit", "full, 4-bit", "full, 1-bit", "PCA-256", "PCA-64", "PCA-16", "PCA-64, 4-bit", "PCA-16, 4-bit", "DP eps=64", "DP eps=8", "CLIP-L, full, 16-bit"]
     pretty = {"noise rho=1": "noise $\\rho=1$", "noise rho=3": "noise $\\rho=3$", "DP eps=64": "clip + noise, $\\varepsilon=64$", "DP eps=8": "clip + noise, $\\varepsilon=8$"}
     for name in order:
         r = inv["single"].get(name)
@@ -599,15 +612,15 @@ if inv and "single" in inv:
         a = accmap.get(name)
         j = inv.get("joint", {}).get(name)
         ps = f"{r['psnr']:.1f}" + (f"\\,{{\\scriptsize$\\pm${np.std(r['psnr_seeds'], ddof=1):.1f}}}" if len(r.get("psnr_seeds", [])) > 1 else "")
-        rows.append(f"{pretty.get(name, name)} & {a[1] if a else '--'} & {pm(a[0]) if a else '--'} & {ps} & {r['ssim']:.2f} & {r['reid']['top1']:.1f} & " + (f"{j['psnr']:.1f}" if j else "--") + " \\\\")
-        if name in ("PCA-16", "DP eps=8", "noise rho=3", "full, 1-bit"):
+        rows.append(f"{pretty.get(name, name)} & {a[1] if a else '--'} & {pm(a[0]) if a else '--'} & {ps} & {r['ssim']:.2f} & {r['reid']['top1']:.1f} \\\\")
+        if name in ("PCA-16", "DP eps=8", "PCA-16, 4-bit", "full, 1-bit"):
             rows.append("\\midrule")
     rows.append("\\midrule")
-    rows.append(f"\\emph{{reference:}} mean training image & -- & -- & {inv['mean_image']['psnr']:.1f} & {inv['mean_image']['ssim']:.2f} & 0.0 & -- \\\\")
+    rows.append(f"\\emph{{reference:}} mean training image & -- & -- & {inv['mean_image']['psnr']:.1f} & {inv['mean_image']['ssim']:.2f} & 0.0 \\\\")
     if "mean_colour_oracle" in inv:
         mo = inv["mean_colour_oracle"]
-        rows.append(f"\\emph{{reference:}} each image's mean colour & -- & -- & {mo['psnr']:.1f} & {mo['ssim']:.2f} & {mo['reid']['top1']:.1f} & -- \\\\")
-    rows.append(f"\\emph{{reference:}} nearest training image & -- & -- & {inv['nearest_neighbour']['psnr']:.1f} & {inv['nearest_neighbour']['ssim']:.2f} & -- & -- \\\\")
+        rows.append(f"\\emph{{reference:}} each image's mean colour & -- & -- & {mo['psnr']:.1f} & {mo['ssim']:.2f} & {mo['reid']['top1']:.1f} \\\\")
+    rows.append(f"\\emph{{reference:}} nearest training image & -- & -- & {inv['nearest_neighbour']['psnr']:.1f} & {inv['nearest_neighbour']['ssim']:.2f} & -- \\\\")
     rows = [r for i, r in enumerate(rows) if not (r == "\\midrule" and i + 1 < len(rows) and rows[i + 1] == "\\midrule")]
     write("tab_privacy.tex", "\n".join(rows))
     for name, tag in (("full, 16-bit", "Full"), ("PCA-64", "PCAsf"), ("PCA-16", "PCAst"), ("PCA-256", "PCAtf"), ("DP eps=8", "DPeight"), ("DP eps=64", "DPsf"),
@@ -633,7 +646,7 @@ npz = os.path.join(RES, "vb224_inversion_examples.npz")
 if os.path.exists(npz) and inv:
     z = np.load(npz)
     cols = [("original", "original"), ("mean colour", None), ("nearest_neighbour", "nearest\ntraining image"), ("single__full_16-bit", "single upload,\nfull"),
-            ("joint__full_16-bit", "16 uploads,\nfull"), ("single__PCA-64", "single upload,\nPCA-64"), ("single__DP_eps8", "single upload,\nclip+noise $\\varepsilon$=8"),
+            ("single__PCA-64", "single upload,\nPCA-64"), ("single__DP_eps8", "single upload,\nclip+noise $\\varepsilon$=8"),
             ("single__CLIP-L_full_16-bit", "single upload,\nCLIP-L")]
     cols = [(k, t) for k, t in cols if k == "mean colour" or k in z.files]
     ex = [0, 1, 2, 3]
@@ -665,8 +678,7 @@ for key, lab, k in HEDS:
     met = "f1" if r["metric"] == "f1" else "acc"
     full = r.get("full", {})
     p256, p64, p16 = r.get("pca256", {}), r.get("pca64", {}), r.get("pca16", {})
-    cells = [pm(full.get("mlp2"), met), pm(full.get("linear_softmax"), met), pm(full.get("ridge"), met), pm(p256.get("ridge"), met), pm(p256.get("polylogistic"), met),
-             pm(p64.get("ridge"), met), pm(p64.get("polylogistic"), met), pm(p16.get("ridge"), met)]
+    cells = [pm(full.get("mlp2"), met), pm(full.get("ridge"), met), pm(p256.get("ridge"), met), pm(p64.get("ridge"), met), pm(p16.get("ridge"), met)]
     rows.append(f"{lab} & " + " & ".join(cells) + " \\\\")
     t = key.replace("/", "").replace("_", "").replace("224", "").replace("dinov2g", "G").replace("clipl14", "C").replace("vertibench", "Vb").replace("milk10k", "Milk")
     t = "".join(ch for ch in t if ch.isalpha())[:14]
@@ -689,6 +701,11 @@ for key, tag in (("milk10k/dinov2_g/pca64", "Milk"), ("vertibench/dinov2_g_224/p
         macro(f"hc{tag}ServerH", f"{c['extrapolated_secs_server'] / 3600:.1f}")
         macro(f"hc{tag}Expand", f"{c['upload_bytes_per_party'] / c['plain_fp16_bytes_per_party']:.0f}")
         macro(f"hc{tag}Agg", size(c["aggregate_bytes_round_trip"]))
+        macro(f"hc{tag}N", f"{c['N']:,}".replace(",", "{,}"))
+        if tag == "Milk":  # the full-dimensional ridge (1,536 features per party), extrapolated from the same timings
+            nf = c["parties"] * (c["parties"] - 1) // 2 * 1536**2
+            macro("hcMilkFullH", f"{(nf * c['secs_ctct_inner_product'] + 2 * 1536 * c['C'] * c['secs_ptct_inner_product']) / 3600:.0f}")
+            macro("hcMilkFullUp", size(1536 * c["chunks"] * c["ciphertext_bytes"]))
 
 # ------------------------------------------------------------------ placeholders, so that the paper compiles on partial results
 for t in ("tab_main", "tab_encoders", "tab_combo_enc", "tab_classic", "tab_sun", "tab_milk", "tab_milkfusion", "tab_milkreg", "tab_freeze", "tab_ws", "tab_wsfusion",
