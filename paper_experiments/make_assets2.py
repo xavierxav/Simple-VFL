@@ -381,29 +381,32 @@ if msplit or milk:
 # ------------------------------------------------------------------ WorldStrat: sensors, labels, resolution
 if ws:
     TASKS = [("ipcc", "IPCC land cover (7)"), ("smod", "degree of urbanisation (8)"), ("lccs", "LCCS land cover (18)")]
+    FTASKS = [("ipcc", "IPCC land cover (7 classes)"), ("lccs", "LCCS land cover (18 classes)"), ("smod", "degree of urbanisation (8 classes)")]
     GS = ["1.5m", "3m", "6m", "10m"]
     gx = [1.5, 3, 6, 10]
-    fig, axs = plt.subplots(1, 3, figsize=(6.8, 2.3), sharex=True)
-    for ax, (t, lab) in zip(axs, TASKS):
+    fig, axs = plt.subplots(1, 3, figsize=(6.8, 2.35), sharex=True)
+    for ax, (t, lab) in zip(axs, FTASKS):
         r = ws.get(t, {})
         for cfg, col, ls, l in (("SPOT {g}", C["blue"], "-", "SPOT alone"), ("SPOT {g} + S2 MS", C["green"], "-", "SPOT + S2 (RGB, NIR, SWIR)"),
                                 ("SPOT {g} + S2 RGB", C["orange"], "--", "SPOT + S2 (RGB)")):
             pts = [(x, r.get(cfg.format(g=g) + "|mlp2")) for x, g in zip(gx, GS)]
-            pts = [(x, s["f1"], sd(s, "f1")) for x, s in pts if s]
+            pts = [(x, s["f1"]) for x, s in pts if s]
             if pts:
-                ax.errorbar([p[0] for p in pts], [p[1] for p in pts], yerr=[p[2] for p in pts], marker="o", ms=2.5, capsize=1.5, color=col, ls=ls, lw=1, label=l)
+                ax.plot([p[0] for p in pts], [p[1] for p in pts], marker="o", ms=3, color=col, ls=ls, lw=1.2, label=l)
         for cfg, col, l in (("S2 MS", C["green"], "S2 alone (RGB, NIR, SWIR)"), ("S2 RGB", C["orange"], "S2 alone (RGB)")):
             s = r.get(cfg + "|mlp2")
             if s:
-                ax.axhline(s["f1"], color=col, ls=":", lw=0.9, label=l)
+                ax.axhline(s["f1"], color=col, ls=":", lw=1, label=l)
         ax.set_xscale("log")
+        ax.minorticks_off()
         ax.set_xticks(gx)
         ax.set_xticklabels(["1.5", "3", "6", "10"])
         ax.set_xlabel("SPOT ground sampling (m)")
         ax.set_title(lab, fontsize=7)
     axs[0].set_ylabel("macro F1 (%)")
-    axs[0].legend(frameon=False, fontsize=5, loc="lower left")
-    fig.tight_layout()
+    h, l = axs[0].get_legend_handles_labels()
+    fig.legend(h, l, frameon=False, fontsize=6, loc="upper center", ncol=5, bbox_to_anchor=(0.5, 1.0))
+    fig.tight_layout(rect=(0, 0, 1, 0.9))
     fig.savefig(os.path.join(OUT, "fig_ws.pdf"))
     plt.close(fig)
     WCFG = [("SPOT 1.5m", "SPOT, 1.5\\,m (A)"), ("SPOT 10m", "SPOT, degraded to 10\\,m"), ("S2 RGB", "Sentinel-2, RGB (B)"), ("S2 MS", "Sentinel-2, RGB + NIR + SWIR"),
@@ -426,6 +429,12 @@ if ws:
             s = r.get(c + "|mlp2")
             if s:
                 macro(f"ws{tt}{tc}", f1(s["f1"]))
+        for g, gt in (("1.5m", "A"), ("3m", "Three"), ("6m", "Six"), ("10m", "Ten")):
+            ka, kb = f"SPOT {g} + S2 MS|mlp2", f"SPOT {g}|mlp2"
+            if ka in r and kb in r:
+                x = np.array(r[ka]["f1s"]) - np.array(r[kb]["f1s"])
+                macro(f"wg{tt}{gt}", ("+" if x.mean() >= 0 else "$-$") + f"{abs(x.mean()):.1f}")
+                macro(f"wg{tt}{gt}W", f"{int((x > 0).sum())}/{len(x)}")
         if "counts" in r:
             macro(f"ws{tt}N", f"{sum(r['counts']):,}".replace(",", "{,}"))
 
@@ -433,22 +442,18 @@ if ws:
 wf = load("ws_fusion.json")
 if wf:
     FT = [("ipcc", "IPCC"), ("lccs", "LCCS"), ("smod", "SMOD")]
-    FR = [("SPOT|mlp2", "SPOT alone", "--"), ("S2 mean|mlp2", "S2 alone, mean of revisits", "1"), ("S2 clear-mean|mlp2", "S2 alone, mean of 8 clearest", "1"),
-          ("S2 set16|set attn", "S2 alone, 16 revisits, shared-weight set head", "16"), None,
-          ("SPOT + S2 mean|concat", "concat MLP, S2 mean", "1"), ("SPOT + S2 median|concat", "concat MLP, S2 median", "1"),
-          ("SPOT + S2 clear-mean|concat", "concat MLP, S2 clearest mean", "1"), ("SPOT + S2 mean+std|concat", "concat MLP, S2 mean + temporal std", "2"),
-          ("SPOT + S2 clear-mean|pca256 concat", "PCA-256 per party + concat MLP", "1"), ("SPOT + S2 clear-mean|late fusion", "late fusion (log-prob.\\ average)", "1"),
-          ("SPOT + S2 clear-mean|branch aux md0.0", "branches + auxiliary losses", "1"), ("SPOT + S2 clear-mean|branch aux md0.3", "branches + aux.\\ losses + modality dropout", "1"),
-          ("SPOT + S2 set16|set attn", "SPOT + shared-weight set head (16 revisits)", "16"), ("SPOT + S2 set8 clear|set attn", "SPOT + set head (8 clearest)", "8"), None,
-          ("SPOT centre|mlp2", "SPOT centre crop (336\\,m) alone", "--"), ("SPOT full+centre|mlp2", "SPOT full + centre", "--"),
-          ("S2 centre clear-mean|mlp2", "S2 centre crop alone, clearest mean", "1"),
-          ("SPOT full+centre + S2 centre clear-mean|concat", "full + centre, concat MLP", "1"), ("SPOT full+centre + S2 centre clear-mean|late fusion", "full + centre, late fusion", "1"),
-          ("SPOT full+centre + S2 centre clear-mean|branch aux md0.3", "full + centre, branches + modality dropout", "1"),
-          ("SPOT full+centre + S2 centre set8 clear|set attn", "full + centre, set head (8 clearest)", "8"), None,
-          ("SPOT centre1k|mlp2", "SPOT centre crop (1\\,km) alone", "--"), ("SPOT 3 scales|mlp2", "SPOT, 3 scales (1.58\\,km, 1\\,km, 336\\,m)", "--"),
-          ("S2 3 scales clear-mean|mlp2", "S2, 3 scales, clearest mean", "3"),
-          ("SPOT 3 scales + S2 3 scales clear-mean|concat", "3 scales, concat MLP", "3"), ("SPOT 3 scales + S2 3 scales clear-mean|late fusion", "3 scales, late fusion", "3"),
-          ("SPOT 3 scales + S2 3 scales clear-mean|branch aux md0.3", "3 scales, branches + modality dropout", "3")]
+    FR = [("SPOT|mlp2", "SPOT, full area", "--"), ("SPOT tiles mean|mlp2", "SPOT, mean of 16 tiles at full resolution", "--"),
+          ("SPOT centre1k|mlp2", "SPOT, centre 1\\,km", "--"), ("SPOT centre|mlp2", "SPOT, centre 336\\,m", "--"),
+          ("SPOT full+centre|mlp2", "SPOT, full area and centre 336\\,m", "--"), None,
+          ("S2 mean|mlp2", "S2, mean of revisits", "1"), ("S2 mean+std|mlp2", "S2, mean and temporal std", "2"),
+          ("S2 set16|set attn", "S2, 16 revisits, shared-weight set head", "16"), None,
+          ("SPOT + S2 mean|concat", "concat MLP, S2 mean", "1"), ("SPOT + S2 mean+std|concat", "concat MLP, S2 mean and std", "2"),
+          ("SPOT + S2 clear-mean|concat", "concat MLP, S2 mean of 8 clearest (C)", "1"), ("SPOT + S2 clear-mean|pca256 concat", "C, PCA-256 per party", "1"),
+          ("SPOT + S2 clear-mean|late fusion", "C, late fusion", "1"), ("SPOT + S2 clear-mean|branch aux md0.3", "C, branches, aux.\\ losses, modality dropout", "1"),
+          ("SPOT + S2 set16|set attn", "S2 by shared-weight set head (16 revisits)", "16"), None,
+          ("SPOT full+centre + S2 centre clear-mean|late fusion", "full area and centre, late fusion", "1"),
+          ("SPOT 3 scales + S2 3 scales clear-mean|concat", "3 scales per party, concat MLP", "3"),
+          ("SPOT 3 scales + S2 3 scales clear-mean|late fusion", "3 scales per party, late fusion", "3")]
     rows = []
     for r in FR:
         if r is None:
@@ -476,6 +481,22 @@ if wf:
         best = max(((k, v["f1"]) for k, v in r.items() if isinstance(v, dict) and "f1" in v and "+" in k), key=lambda kv: kv[1], default=None)
         if best:
             macro(f"wf{tt.capitalize()}BestFus", f1(best[1]))
+        for tag, (ka, kb) in {"FusCat": ("SPOT + S2 mean|concat", "SPOT|mlp2"), "LateCat": ("SPOT + S2 clear-mean|late fusion", "SPOT + S2 clear-mean|concat"),
+                              "SetCat": ("SPOT + S2 set16|set attn", "SPOT + S2 mean|concat"), "StdSolo": ("S2 mean+std|mlp2", "S2 mean|mlp2"),
+                              "StdFus": ("SPOT + S2 mean+std|concat", "S2 mean+std|mlp2"), "Centre": ("SPOT|mlp2", "SPOT centre|mlp2"),
+                              "FC": ("SPOT full+centre|mlp2", "SPOT|mlp2"), "Tiles": ("SPOT tiles mean|mlp2", "SPOT|mlp2"),
+                              "Pca": ("SPOT + S2 clear-mean|pca256 concat", "SPOT + S2 clear-mean|concat"),
+                              "Branch": ("SPOT + S2 clear-mean|branch aux md0.3", "SPOT + S2 clear-mean|concat")}.items():
+            if ka in r and kb in r:
+                x = np.array(r[ka]["f1s"]) - np.array(r[kb]["f1s"])
+                macro(f"wp{tt.capitalize()}{tag}", ("+" if x.mean() >= 0 else "$-$") + f"{abs(x.mean()):.1f}")
+                macro(f"wp{tt.capitalize()}{tag}W", f"{int((x > 0).sum())}/{len(x)}")
+        if "S2 mean+std|mlp2" in r:
+            macro(f"wf{tt.capitalize()}SolStd", f1(r["S2 mean+std|mlp2"]["f1"]))
+        if "SPOT tiles mean|mlp2" in r:
+            macro(f"wf{tt.capitalize()}SpotTiles", f1(r["SPOT tiles mean|mlp2"]["f1"]))
+        if "SPOT centre1k|mlp2" in r:
+            macro(f"wf{tt.capitalize()}SpotCk", f1(r["SPOT centre1k|mlp2"]["f1"]))
         for dk, dt in (("diag SPOT vs S2 clear-mean", ""), ("diag SPOT 3 scales vs S2 3 scales clear-mean", "MS")):
             d = r.get(dk)
             if not d:
