@@ -53,7 +53,10 @@ class Bottom(nn.Module):
         if kind.endswith("_lora"):
             from peft import LoraConfig, get_peft_model
 
-            tm = ["q_proj", "v_proj"] if self.clip else ["query", "value"]
+            lin = {n.split(".")[-1] for n, mod in m.named_modules() if isinstance(mod, nn.Linear)}
+            # attention query/value projections; their names differ across model families and transformers versions
+            tm = [t for t in ("q_proj", "v_proj", "query", "value") if t in lin] or [t for t in ("qkv",) if t in lin]
+            assert tm, f"no attention projection among {sorted(lin)}"
             m = get_peft_model(m, LoraConfig(r=16, lora_alpha=16, lora_dropout=0.0, target_modules=tm))
         elif kind.endswith("_frozen"):
             for p in m.parameters():
