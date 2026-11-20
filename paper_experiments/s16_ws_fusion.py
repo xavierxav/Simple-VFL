@@ -3,8 +3,8 @@
 Runs after s15 (reuses its arrays and per-revisit features in $PE_WS2).  Everything stays one-shot: each party
 uploads once; what changes is (i) the local summary the Sentinel-2 party uploads and (ii) the head.
 
-  python s16_ws_fusion.py extra     GPU: party-local cloud score per revisit; centre crops (~340 m, the footprint of
-                                    the land-cover label) of SPOT (1.5 m) and of every S2 revisit (RGB, NIR, SWIR);
+  python s16_ws_fusion.py extra     GPU: party-local cloud score per revisit; centre crops of ~340 m (the 300 m ESA-CCI
+                                    pixel at the AOI centre that gives the IPCC/LCCS labels) and of 1 km (the GHSL SMOD cell) of SPOT (1.5 m) and of every S2 revisit (RGB, NIR, SWIR);
                                     SPOT 4x4 tiles (263 px each) encoded with the shared frozen encoder
   python s16_ws_fusion.py heads     -> ws_fusion.json
 
@@ -81,6 +81,13 @@ def extra():
         return (x - spm) / sps
 
     run(f"{ROOT}/f_spot_dinov2_g_centre.npy", N, 64, spot_centre)
+    c1 = (1050 - 666) // 2  # 666 px x 1.5 m = 1 km around the centre (the GHSL SMOD cell)
+
+    def spot_centre1k(i, j):
+        x = torch.from_numpy(np.ascontiguousarray(SP[i:j, :, c1 : c1 + 666, c1 : c1 + 666])).to(DEV).float()
+        return F.interpolate((x - spm) / sps, size=(672, 672), mode="bilinear", antialias=True, align_corners=False)
+
+    run(f"{ROOT}/f_spot_dinov2_g_centre1k.npy", N, 8, spot_centre1k)
     T = 4
     ts = 1050 // T  # 262 px tiles (1.5 m), 16 per area
 
@@ -103,6 +110,14 @@ def extra():
 
     for name, bands in (("rgb", RGB), ("nir", NIR), ("swir", SWIR)):
         run(f"{ROOT}/f_s2_dinov2_g_{name}_centre.npy", N * 16, 256, lambda i, j, b=bands: s2_centre(i, j, b))
+    k1 = (158 - 100) // 2  # 100 px x 10 m = 1 km
+
+    def s2_centre1k(i, j, bands):
+        x = torch.from_numpy(np.ascontiguousarray(s2flat[i:j, :, k1 : k1 + 100, k1 : k1 + 100])).to(DEV).float()
+        return F.interpolate(((x - s2m) / s2s)[:, bands], size=(224, 224), mode="bilinear", align_corners=False)
+
+    for name, bands in (("rgb", RGB), ("nir", NIR), ("swir", SWIR)):
+        run(f"{ROOT}/f_s2_dinov2_g_{name}_centre1k.npy", N * 16, 256, lambda i, j, b=bands: s2_centre1k(i, j, b))
     p = f"{ROOT}/feature_secs_s16.json"
     old = json.load(open(p)) if os.path.exists(p) else {}
     old.update(cost)
@@ -257,11 +272,22 @@ def heads():
             P["S2 centre clear-mean"] = np.take_along_axis(S2C, clear[:, :, None], 1).mean(1)
     if "SPOT centre" in P:
         P["SPOT full+centre"] = np.concatenate([P["SPOT"], P["SPOT centre"]], 1)
+    if os.path.exists(f"{ROOT}/f_spot_dinov2_g_centre1k.npy"):
+        P["SPOT centre1k"] = np.load(f"{ROOT}/f_spot_dinov2_g_centre1k.npy").astype(np.float32)
+        if "SPOT centre" in P:
+            P["SPOT 3 scales"] = np.concatenate([P["SPOT"], P["SPOT centre1k"], P["SPOT centre"]], 1)
+    if os.path.exists(f"{ROOT}/f_s2_dinov2_g_swir_centre1k.npy") and cloud is not None:
+        S2K = np.concatenate([per_revisit(f"dinov2_g_{b}_centre1k") for b in ("rgb", "nir", "swir")], 2)
+        P["S2 centre1k clear-mean"] = np.take_along_axis(S2K, clear[:, :, None], 1).mean(1)
+        del S2K
+        if "S2 centre clear-mean" in P:
+            P["S2 3 scales clear-mean"] = np.concatenate([P["S2 clear-mean"], P["S2 centre1k clear-mean"], P["S2 centre clear-mean"]], 1)
     path = os.path.join(OUT, "ws_fusion.json")
     res = json.load(open(path)) if os.path.exists(path) else {}
-    single = [k for k in P if not k.startswith("SPOT full+")] + (["SPOT full+centre"] if "SPOT full+centre" in P else [])
+    single = list(P)
     concat = [["SPOT", "S2 mean"], ["SPOT", "S2 median"], ["SPOT", "S2 mean+std"], ["SPOT", "S2 clear-mean"], ["SPOT centre", "S2 centre mean"],
-              ["SPOT full+centre", "S2 clear-mean"], ["SPOT full+centre", "S2 centre clear-mean"], ["SPOT tiles mean", "S2 clear-mean"]]
+              ["SPOT full+centre", "S2 clear-mean"], ["SPOT full+centre", "S2 centre clear-mean"], ["SPOT tiles mean", "S2 clear-mean"],
+              ["SPOT centre1k", "S2 centre1k clear-mean"], ["SPOT 3 scales", "S2 3 scales clear-mean"]]
     concat = [c for c in concat if all(p in P for p in c)]
     for task in ("ipcc", "lccs", "smod"):
         y_all, classes = labels(df, task)
@@ -298,7 +324,7 @@ def heads():
                 record(key, runs)
             return pv, pt
 
-        need = {"SPOT", "S2 mean", "S2 clear-mean", "SPOT full+centre", "S2 centre clear-mean"}
+        need = {"SPOT", "S2 mean", "S2 clear-mean", "SPOT full+centre", "S2 centre clear-mean", "SPOT 3 scales", "S2 3 scales clear-mean"}
         for p in single:
             if p in need or f"{p}|mlp2" not in out:
                 probas[p] = plain(f"{p}|mlp2", [p])
@@ -315,7 +341,7 @@ def heads():
         if key not in out and "S2 clear-mean" in P:
             plain(key, ["SPOT", "S2 clear-mean"], pca=256)
         # late fusion: weighted mean of log-probabilities, weight chosen on the validation fold
-        for a, b in (("SPOT", "S2 mean"), ("SPOT", "S2 clear-mean"), ("SPOT full+centre", "S2 centre clear-mean")):
+        for a, b in (("SPOT", "S2 mean"), ("SPOT", "S2 clear-mean"), ("SPOT full+centre", "S2 centre clear-mean"), ("SPOT 3 scales", "S2 3 scales clear-mean")):
             key = f"{a} + {b}|late fusion"
             if key in out or not probas.get(a) or not probas.get(b):
                 continue
@@ -332,7 +358,7 @@ def heads():
             record(key, runs)
             out[key]["spot_weight"] = ws
         # diagnostics: do the two parties fail on the same areas?
-        for a, b in (("SPOT", "S2 mean"), ("SPOT", "S2 clear-mean")):
+        for a, b in (("SPOT", "S2 mean"), ("SPOT", "S2 clear-mean"), ("SPOT 3 scales", "S2 3 scales clear-mean")):
             if not probas.get(a) or not probas.get(b):
                 continue
             both, either, ea, eb = [], [], [], []
@@ -346,7 +372,8 @@ def heads():
                                        "oracle_acc": float(np.mean(either)), "both_wrong_if_independent": float(np.mean(ea) * np.mean(eb) / 100)}
             print(task, "diag", a, b, out[f"diag {a} vs {b}"], flush=True)
         # branch head: per-party projections, auxiliary losses, modality dropout
-        for parts, pdrop in ((["SPOT", "S2 clear-mean"], 0.0), (["SPOT", "S2 clear-mean"], 0.3), (["SPOT full+centre", "S2 centre clear-mean"], 0.3)):
+        for parts, pdrop in ((["SPOT", "S2 clear-mean"], 0.0), (["SPOT", "S2 clear-mean"], 0.3), (["SPOT full+centre", "S2 centre clear-mean"], 0.3),
+                             (["SPOT 3 scales", "S2 3 scales clear-mean"], 0.3)):
             key = " + ".join(parts) + f"|branch aux md{pdrop}"
             if key in out or not all(p in P for p in parts):
                 continue

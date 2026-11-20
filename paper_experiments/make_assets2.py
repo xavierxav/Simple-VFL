@@ -335,7 +335,11 @@ if wf:
           ("S2 centre clear-mean|mlp2", "S2 centre crop alone, clearest mean", "1"),
           ("SPOT full+centre + S2 centre clear-mean|concat", "full + centre, concat MLP", "1"), ("SPOT full+centre + S2 centre clear-mean|late fusion", "full + centre, late fusion", "1"),
           ("SPOT full+centre + S2 centre clear-mean|branch aux md0.3", "full + centre, branches + modality dropout", "1"),
-          ("SPOT full+centre + S2 centre set8 clear|set attn", "full + centre, set head (8 clearest)", "8")]
+          ("SPOT full+centre + S2 centre set8 clear|set attn", "full + centre, set head (8 clearest)", "8"), None,
+          ("SPOT centre1k|mlp2", "SPOT centre crop (1\\,km) alone", "--"), ("SPOT 3 scales|mlp2", "SPOT, 3 scales (1.58\\,km, 1\\,km, 336\\,m)", "--"),
+          ("S2 3 scales clear-mean|mlp2", "S2, 3 scales, clearest mean", "3"),
+          ("SPOT 3 scales + S2 3 scales clear-mean|concat", "3 scales, concat MLP", "3"), ("SPOT 3 scales + S2 3 scales clear-mean|late fusion", "3 scales, late fusion", "3"),
+          ("SPOT 3 scales + S2 3 scales clear-mean|branch aux md0.3", "3 scales, branches + modality dropout", "3")]
     rows = []
     for r in FR:
         if r is None:
@@ -354,17 +358,21 @@ if wf:
                          ("SPOT + S2 clear-mean|late fusion", "Late"), ("SPOT + S2 clear-mean|branch aux md0.3", "Branch"), ("SPOT + S2 set16|set attn", "Set"),
                          ("SPOT + S2 set8 clear|set attn", "SetClear"), ("S2 set16|set attn", "SolSet"), ("S2 mean|mlp2", "SolMean"), ("S2 clear-mean|mlp2", "SolClear"),
                          ("SPOT full+centre|mlp2", "SpotFC"), ("SPOT centre|mlp2", "SpotC"), ("SPOT full+centre + S2 centre clear-mean|concat", "FCCat"),
-                         ("SPOT full+centre + S2 centre clear-mean|late fusion", "FCLate"), ("SPOT full+centre + S2 centre set8 clear|set attn", "FCSet")):
+                         ("SPOT full+centre + S2 centre clear-mean|late fusion", "FCLate"), ("SPOT full+centre + S2 centre set8 clear|set attn", "FCSet"),
+                         ("SPOT 3 scales|mlp2", "SpotMS"), ("S2 3 scales clear-mean|mlp2", "SolMS"), ("SPOT 3 scales + S2 3 scales clear-mean|concat", "MSCat"),
+                         ("SPOT 3 scales + S2 3 scales clear-mean|late fusion", "MSLate"), ("SPOT 3 scales + S2 3 scales clear-mean|branch aux md0.3", "MSBranch")):
             s = r.get(key)
             if s:
                 macro(f"wf{tt.capitalize()}{tag}", f1(s["f1"]))
         best = max(((k, v["f1"]) for k, v in r.items() if isinstance(v, dict) and "f1" in v and "+" in k), key=lambda kv: kv[1], default=None)
         if best:
             macro(f"wf{tt.capitalize()}BestFus", f1(best[1]))
-        d = r.get("diag SPOT vs S2 clear-mean") or r.get("diag SPOT vs S2 mean")
-        if d:
+        for dk, dt in (("diag SPOT vs S2 clear-mean", ""), ("diag SPOT 3 scales vs S2 3 scales clear-mean", "MS")):
+            d = r.get(dk)
+            if not d:
+                continue
             for k2, tag in (("err_a", "ErrA"), ("err_b", "ErrB"), ("both_wrong", "Both"), ("oracle_acc", "Oracle"), ("both_wrong_if_independent", "Indep")):
-                macro(f"wf{tt.capitalize()}{tag}", f1(d[k2]))
+                macro(f"wf{tt.capitalize()}{dt}{tag}", f1(d[k2]))
 
 # ------------------------------------------------------------------ compression (Pareto, validation-selected points) at 224 px
 par = Eg.get("E7_pareto_val") if isinstance(Eg.get("E7_pareto_val"), list) else None
