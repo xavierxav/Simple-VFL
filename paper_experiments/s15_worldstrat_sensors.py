@@ -107,8 +107,15 @@ def prepare():
             i, r = aoi[mm.group(1)], int(mm.group(2)) - 1
             if r >= 16:
                 continue
-            a = tifffile.imread(io.BytesIO(tf.extractfile(m).read()))  # [159,158,13] float32 reflectance
-            a = np.nan_to_num(a[:158, :158].transpose(2, 0, 1), nan=0.0)
+            try:
+                a = tifffile.imread(io.BytesIO(tf.extractfile(m).read()))  # [159,158,13] float32 reflectance
+            except Exception as e:  # a corrupt tile: leave the revisit unseen (its area is then left out)
+                print("!! unreadable", m.name, repr(e), flush=True)
+                continue
+            a = a[:158, :158]
+            if a.shape[:2] != (158, 158):  # a few tiles are 159 x 157: pad the missing column/row by edge replication
+                a = np.pad(a, ((0, 158 - a.shape[0]), (0, 158 - a.shape[1]), (0, 0)), mode="edge")
+            a = np.nan_to_num(a.transpose(2, 0, 1), nan=0.0)
             S2[i, r] = np.clip(a * 255 + 0.5, 0, 255).astype(np.uint8)  # reflectance 0..1 in 8 bits
             seen[i, r] = True
             if seen.sum() % 5000 == 0:
