@@ -208,6 +208,10 @@ if bb or any(base.values()):
     MiB = 1024 * 1024
     grp = lambda t: f"\\multicolumn{{6}}{{@{{}}l}}{{\\emph{{{t}}}}} \\\\"  # noqa: E731
     rows = [grp("Iterative: split learning, end-to-end"), "SplitNN, published~\\cite{wu2024vertibench} & 13 & -- & $81.17$\\,{\\scriptsize$\\pm$0.35} & -- & -- \\\\"]
+    rep = load("vb_repro_splitresnet.json")
+    if rep:
+        ep = len(rep["curves"][0])
+        rows.append(f"SplitResNet, VertiBench recipe (ours) & 13 & {2 * 16 * 512 * 4 * ep / MiB:.1f}\\,MiB ({ep} ep.) & {pm(rep['last_epoch'])} & {pm(rep['last_epoch'], 'auc')} & {fmin(np.mean(rep['secs_per_seed']) / 60)} \\\\")
     for k, bands in (("splitnn_all", 13), ("splitnn_rgb", 3)):
         b = base[k]
         if b:
@@ -233,6 +237,42 @@ if bb or any(base.values()):
         write("timing.tex", "".join(f"\\newcommand{{\\gpu{k.replace('dinov2_', '').upper()}}}{{{tim[k]['gpu_min_all_parties']:.1f}}}" for k in ("dinov2_s", "dinov2_b", "dinov2_l", "dinov2_g") if k in tim)
               + "".join(f"\\newcommand{{\\headSecs}}{{{t['head_train_secs_dinov2_g_mlp2']:.0f}}}" for t in [load("vb_timing_L4.json") or tim][:1] if "head_train_secs_dinov2_g_mlp2" in t) + "\n")
 
+# ------------------------------------------------------------------ why CLIP: encoder ablations x geography
+enc, geo = load("vb_encoders.json"), load("vb_geo.json")
+if enc:
+    label7 = {"dinov2_g_168": "DINOv2 ViT-g/14, 168\\,px, CLS", "dinov2_g_224": "DINOv2 ViT-g/14, 224\\,px, CLS",
+              "dinov2_g_168_clsmean": "DINOv2 ViT-g/14, 168\\,px, CLS + mean patch", "clip_l14_224": "CLIP ViT-L/14, 224\\,px",
+              "clip_l14_168": "CLIP ViT-L/14, 168\\,px", "clip_b16_224": "CLIP ViT-B/16, 224\\,px", "siglip_b16_224": "SigLIP ViT-B/16, 224\\,px",
+              "dinov2_s_168": "DINOv2 ViT-S/14, 168\\,px", "dinov2_b_random_168": "ViT-B/14, random weights"}
+    rows = []
+    for k, name in label7.items():
+        if k not in enc:
+            continue
+        cells = [name, pm(enc[k]["mlp2"])]
+        if geo and "nn_geolocation" in geo and k in geo["nn_geolocation"]:
+            g = geo["nn_geolocation"][k]
+            cells += [f"{g['median_km']:.0f}", f"{g['within_100km']:.0f}"]
+        else:
+            cells += ["--", "--"]
+        for reg in ("random", "spatial"):
+            c = (geo or {}).get("cv", {}).get(reg, {}).get(k)
+            cells.append(pm(c) if c else "--")
+        rows.append(" & ".join(cells) + " \\\\")
+    if geo and "official_location_rf" in geo:
+        r = geo["official_location_rf"]
+        cells = ["\\emph{location only} (RF on lon/lat)", f"{r['acc']:.2f}", "--", "--"]
+        for reg in ("random", "spatial"):
+            c = geo.get("cv", {}).get(reg, {}).get("location_rf")
+            cells.append(pm(c) if c else "--")
+        rows += ["\\midrule", " & ".join(cells) + " \\\\"]
+    write("tab_encoders.tex", "\n".join(rows))
+    if geo:
+        mr = geo.get("cv", {}).get("majority_rate", {})
+        write("geo.tex", "".join(f"\\newcommand{{\\geo{k.replace('_', '')}}}{{{v}}}" for k, v in
+              (("nmatched", geo["n_matched"]), ("nconfident", geo["n_confident"]), ("nsamples", geo["n_samples"]),
+               ("align", f"{geo['revisit_alignment_mean'] * 100:.0f}"), ("pois", geo["distinct_pois"]),
+               ("majrandom", f"{np.mean(mr.get('random', [0])):.1f}"), ("majspatial", f"{np.mean(mr.get('spatial', [0])):.1f}"))) + "\n")
+
 # ------------------------------------------------------------------ WorldStrat
 ws = load("ws_results.json")
 if ws:
@@ -244,7 +284,7 @@ if ws:
         rows = []
         for key, name in order:
             cells = []
-            for reg in ("random", "spatial"):
+            for reg in ("random_cv" if "random_cv" in ws[label] else "random", "spatial"):
                 s = ws[label].get(reg, {}).get(key)
                 cells += [pm(s), pm(s, "auc")] if s else ["--", "--"]
             rows.append(f"{name} & " + " & ".join(cells) + " \\\\")
