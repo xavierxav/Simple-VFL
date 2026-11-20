@@ -120,6 +120,17 @@ def random_cv_folds(y, n_folds=5):
     return out
 
 
+def train_test_distances(meta, items):
+    """Median (over test POIs) great-circle distance to the nearest training POI, per fold."""
+    lon, lat = np.radians(meta["lon"].to_numpy()), np.radians(meta["lat"].to_numpy())
+    xyz = np.stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)], 1)
+    out = []
+    for (tr, va, te), _ in items:
+        d = 6371.0 * np.arccos(np.clip(xyz[te] @ xyz[tr].T, -1, 1)).min(1)
+        out.append(float(np.median(d)))
+    return out
+
+
 # ---------------------------------------------------------------- settings
 def pick_view(X, g):  # X [N,V,d] -> random revisit [N,d]
     return X[torch.arange(len(X), device=DEV), torch.randint(0, X.shape[1], (len(X),), generator=g).to(DEV)]
@@ -175,6 +186,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--labels", default="ipcc,simplified_ipcc,sources")
     ap.add_argument("--regimes", default="", help="comma-separated subset of random,random_cv,spatial (default: all)")
+    ap.add_argument("--ks", default="", help="extra spatial regimes with k clusters, e.g. 10,50 (regime name spatial_k<k>)")
     a = ap.parse_args()
     meta, spot, sent = load_all()
     spot, sent = spot.to(DEV), sent.to(DEV)
@@ -193,13 +205,17 @@ def main():
             "random_cv": [(f, i) for i, f in enumerate(random_cv_folds(y))],  # test set changes with the fold
             "spatial": [(f, i) for i, f in enumerate(folds)],
         }
+        for k in [int(x) for x in a.ks.split(",") if x]:
+            regimes[f"spatial_k{k}"] = [(f, i) for i, f in enumerate(spatial_folds(meta, n_clusters=k)[0])]
         if a.regimes:
-            regimes = {k: v for k, v in regimes.items() if k in a.regimes.split(",")}
+            regimes = {k: v for k, v in regimes.items() if k in a.regimes.split(",") or (k.startswith("spatial_k") and a.ks)}
         for reg, items in regimes.items():
             res = {"location_rf": [location_rf(meta, y, tr, te, ncls, s) for (tr, va, te), s in items]}
             res["location_rf"] = summarize(res["location_rf"])
             print(f"[{label}/{reg}] location_rf", fmt(res["location_rf"]), flush=True)
-            if reg in ("spatial", "random_cv"):
+            res["test_to_train_km"] = train_test_distances(meta, items)
+            res["train_majority_acc"] = float(np.mean([(y[te] == np.bincount(y[tr], minlength=ncls).argmax()).mean() * 100 for (tr, va, te), _ in items]))
+            if reg != "random":
                 res["test_class_counts"] = [np.bincount(y[te], minlength=ncls).tolist() for (_, _, te), _ in items]
             for name, (X, arch, hidden, tf, ev) in S.items():
                 t = time.time()

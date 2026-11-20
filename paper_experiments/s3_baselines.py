@@ -85,9 +85,11 @@ def normalise(xb, ch):
     return (xb.float() - m) / s
 
 
-def resnet18(c_in, small_stem=False):
-    m = torchvision.models.resnet18(weights=None)
-    if small_stem:  # 80x80 thumbnails: 3x3 stem, no max-pool
+def resnet18(c_in, small_stem=False, pretrained=False):
+    m = torchvision.models.resnet18(weights="IMAGENET1K_V1" if pretrained else None)
+    if pretrained:  # ImageNet weights: keep the RGB stem
+        assert c_in == 3 and not small_stem
+    elif small_stem:  # 80x80 thumbnails: 3x3 stem, no max-pool
         m.conv1 = nn.Conv2d(c_in, 64, 3, 1, 1, bias=False)
         m.maxpool = nn.Identity()
     else:  # full resolution: standard ImageNet stem, only the number of input channels changes
@@ -105,9 +107,9 @@ def flip_aug(x):
 
 # ------------------------------------------------------------------ SplitNN
 class SplitNN(nn.Module):
-    def __init__(self, c_in, n_cls, small_stem=False):
+    def __init__(self, c_in, n_cls, small_stem=False, pretrained=False):
         super().__init__()
-        self.bottoms = nn.ModuleList([resnet18(c_in, small_stem) for _ in range(16)])
+        self.bottoms = nn.ModuleList([resnet18(c_in, small_stem, pretrained) for _ in range(16)])
         self.top = nn.Sequential(nn.Linear(16 * 512, 1000), nn.BatchNorm1d(1000), nn.ReLU(), nn.Linear(1000, n_cls))
 
     def forward(self, xs):  # xs: list of 16 tensors [B,C,H,W]
@@ -120,15 +122,15 @@ def run_splitnn(a):
     Xtr_all, ch = load_images("train", a.bands, a.res)
     Xte, _ = load_images("test", a.bands, a.res)
     ncls = int(ytr_all.max()) + 1
-    runs, secs = [], []
+    runs, secs, probs = [], [], []
     for seed in [int(s) for s in a.seeds.split(",")]:
         seed_all(seed)
         tr, va = split_val(len(ytr_all), seed, 0.15, ytr_all.cpu().numpy())
         tr, va = torch.from_numpy(tr).to(DEV), torch.from_numpy(va).to(DEV)
-        model = SplitNN(len(ch), ncls, a.res == 80).to(DEV).to(memory_format=torch.channels_last)
+        model = SplitNN(len(ch), ncls, a.res == 80, a.pretrained).to(DEV).to(memory_format=torch.channels_last)
         opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
         steps = a.epochs * ((len(tr) + a.bs - 1) // a.bs)
-        sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=2e-3, total_steps=steps)
+        sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=3e-4 if a.pretrained else 2e-3, total_steps=steps)
         scaler = torch.amp.GradScaler()
         best, best_state = 1e9, None
         t0 = time.time()
@@ -170,9 +172,11 @@ def run_splitnn(a):
                 probs.append(F.softmax(forward(Xte, idx, False).float(), 1))
         p = torch.cat(probs)
         runs.append({"acc": (p.argmax(1) == yte).float().mean().item(), "auc": auc_macro_ovr(yte.cpu().numpy(), p.cpu().numpy())})
+        probs.append(p.cpu().numpy())
         secs.append(time.time() - t0)
         print("SEED", seed, runs[-1], flush=True)
-        save_json(f"baseline_splitnn_{a.bands}{a.tag}.json", {"summary": summarize(runs), "secs_per_seed": secs, "epochs": a.epochs, "batch_size": a.bs, "input_hw": int(Xte.shape[-1]), "gpu": torch.cuda.get_device_name() if DEV.type == "cuda" else "cpu", "peak_mem_gb": torch.cuda.max_memory_allocated() / 1e9 if DEV.type == "cuda" else 0})
+        save_json(f"baseline_splitnn_{a.bands}{a.tag}.json", {"summary": summarize(runs), "secs_per_seed": secs, "epochs": a.epochs, "batch_size": a.bs,
+                                                              "pretrained": a.pretrained, "test_probs_seed_mean": np.mean(probs, 0).round(5).tolist(), "input_hw": int(Xte.shape[-1]), "gpu": torch.cuda.get_device_name() if DEV.type == "cuda" else "cpu", "peak_mem_gb": torch.cuda.max_memory_allocated() / 1e9 if DEV.type == "cuda" else 0})
     print("SplitNN", a.bands, fmt(summarize(runs)), flush=True)
 
 
@@ -270,9 +274,10 @@ if __name__ == "__main__":
     ap.add_argument("--seeds", default="0,1,2,3,4")
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--bs", type=int, default=None)
+    ap.add_argument("--pretrained", action="store_true", help="ImageNet-initialised ResNet-18 bottoms (RGB only)")
     a = ap.parse_args()
     a.res = 80 if a.res == "80" else "full"
-    a.tag = "_r80" if a.res == 80 else ""
+    a.tag = ("_r80" if a.res == 80 else "") + ("_pt" if a.pretrained else "")
     if a.mode == "pack":
         from s1_vertibench_features import ensure_data  # download check + 7z extraction of the raw files
 

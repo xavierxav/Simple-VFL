@@ -133,14 +133,15 @@ def official_heads(names, ytr, yte, ncls):
 
 # ------------------------------------------------------------------ (C) VertiBench <-> WorldStrat matching
 def match_to_worldstrat(vb_all, y_all):
-    """vb_all: [N,16,1536] DINOv2-g features of VertiBench (train then test); y_all: [N] labels.
-    Returns a DataFrame with one row per VertiBench sample: POI, lon, lat and match diagnostics."""
+    """vb_all: [N,16,1536] DINOv2-g features of VertiBench (train then test); y_all: [N] labels, used ONLY afterwards
+    as a diagnostic (provider agreement), never to restrict the matching: otherwise the test labels would leak into
+    the recovered coordinates.  Returns one row per VertiBench sample: POI, lon, lat and match diagnostics."""
     import s5_worldstrat as s5
 
     meta, _, ws = s5.load_all()  # ws: [M,16,1536] DINOv2-g features of the WorldStrat Sentinel-2 L2A RGB revisits
     ws = ws.float()
     prov = meta["POI"].str.split("-").str[0].to_numpy()
-    # VertiBench label index -> provider: the class frequencies identify them (Amnesty 4.8, ASM 8.9, Landcover 61.3, UNHCR 25.0 %)
+    # VertiBench label index -> provider, from the class frequencies alone (Amnesty 4.8, ASM 8.9, Landcover 61.3, UNHCR 25.0 %)
     vb_counts = np.bincount(y_all, minlength=4)
     ws_counts = np.array([(prov == p).sum() for p in PROVIDERS])
     vb_rank, ws_rank = np.argsort(vb_counts), np.argsort(ws_counts)
@@ -153,27 +154,24 @@ def match_to_worldstrat(vb_all, y_all):
 
     V, W = unit(torch.as_tensor(vb_all, device=DEV).float()), unit(ws.to(DEV))
     Vm, Wm = F.normalize(V.mean(1), dim=-1), F.normalize(W.mean(1), dim=-1)
-    rows = [None] * len(V)
-    for lab, p in lab2prov.items():
-        vi = np.where(y_all == lab)[0]
-        wj = np.where(prov == p)[0]
-        S = (Vm[vi] @ Wm[wj].T).cpu().numpy()  # order-invariant similarity (mean over revisits)
-        r, c = linear_sum_assignment(-S)
-        best_w = S.argmax(1)
-        best_v = S.argmax(0)
-        srt = np.sort(S, 1)
-        for a, b in zip(r, c):
-            i, j = vi[a], wj[b]
-            # revisit alignment: is VertiBench party p closest to WorldStrat revisit p?  (chance level 1/16)
-            C = (V[i] @ W[j].T).cpu().numpy()
-            rows[i] = {
-                "vb_index": int(i), "label": int(lab), "provider": p, "poi": meta["POI"].iloc[j], "lon": float(meta["lon"].iloc[j]), "lat": float(meta["lat"].iloc[j]),
-                "sim": float(S[a, b]), "margin": float(S[a, b] - (srt[a, -2] if b == best_w[a] else srt[a, -1])),
-                "mutual_best": bool(best_w[a] == b and best_v[b] == a), "revisit_alignment": float((C.argmax(1) == np.arange(16)).mean()),
-            }
-    df = pd.DataFrame([r for r in rows if r is not None])
-    df["confident"] = df["mutual_best"] & (df["margin"] > 0)
-    print("matched", len(df), "of", len(V), "| mutual best", int(df["mutual_best"].sum()), "| confident", int(df["confident"].sum()),
+    S = (Vm @ Wm.T).cpu().numpy()  # [N,M] order-invariant similarity (mean over revisits), all samples x all POIs
+    t0 = time.time()
+    r, c = linear_sum_assignment(-S)  # global one-to-one assignment, label-free
+    print(f"global assignment {S.shape} in {time.time() - t0:.0f}s", flush=True)
+    best_w, best_v = S.argmax(1), S.argmax(0)
+    srt = np.sort(S, 1)
+    rows = []
+    for i, j in zip(r, c):
+        C = (V[i] @ W[j].T).cpu().numpy()  # revisit alignment: is party p closest to WorldStrat revisit p? (chance 1/16)
+        rows.append({
+            "vb_index": int(i), "label": int(y_all[i]), "provider": prov[j], "poi": meta["POI"].iloc[j], "lon": float(meta["lon"].iloc[j]), "lat": float(meta["lat"].iloc[j]),
+            "sim": float(S[i, j]), "margin": float(S[i, j] - (srt[i, -2] if j == best_w[i] else srt[i, -1])),
+            "mutual_best": bool(best_w[i] == j and best_v[j] == i), "revisit_alignment": float((C.argmax(1) == np.arange(16)).mean()),
+            "provider_agrees": bool(lab2prov[int(y_all[i])] == prov[j]),
+        })
+    df = pd.DataFrame(rows)
+    df["confident"] = df["mutual_best"]  # label-free criterion
+    print("matched", len(df), "of", len(V), "| mutual best", int(df["mutual_best"].sum()), "| provider agreement", df["provider_agrees"].mean(),
           "| median revisit alignment", df["revisit_alignment"].median(), flush=True)
     return df
 
@@ -221,14 +219,18 @@ def cv_items(fold):
 
 
 def main():
+    import sys
+
+    geo_only = "--geo-only" in sys.argv  # features and vb_encoders.json already there: redo (C) and (D) only
     ytr = torch.from_numpy(np.load(f"{CACHE}/labels_train.npy")).to(DEV)
     yte = torch.from_numpy(np.load(f"{CACHE}/labels_test.npy")).to(DEV)
     ncls = int(ytr.max()) + 1
     extract_all()
     names = [n for n in ("dinov2_g_168", "dinov2_g_224", "dinov2_g_168_clsmean", "clip_l14_224", "clip_l14_168", "clip_b16_224", "siglip_b16_224", "dinov2_s_168", "dinov2_b_random_168")
              if os.path.exists(f"{CACHE}/f7_{n}_test.npy")]
-    enc_res = official_heads(names, ytr, yte, ncls)
-    save_json("vb_encoders.json", enc_res)
+    if not geo_only:
+        enc_res = official_heads(names, ytr, yte, ncls)
+        save_json("vb_encoders.json", enc_res)
 
     # ---- matching
     g_tr, g_te = load_feats("dinov2_g_168")
@@ -241,7 +243,8 @@ def main():
     geo = {"n_samples": int(len(y_all)), "n_matched": int(len(df)), "n_confident": int(df["confident"].sum()),
            "n_mutual_best": int(df["mutual_best"].sum()), "median_margin": float(df["margin"].median()),
            "revisit_alignment_median": float(df["revisit_alignment"].median()), "revisit_alignment_mean": float(df["revisit_alignment"].mean()),
-           "distinct_pois": int(df["poi"].nunique())}
+           "distinct_pois": int(df["poi"].nunique()), "provider_agreement": float(df["provider_agrees"].mean()),
+           "provider_agreement_confident": float(df.loc[df["confident"], "provider_agrees"].mean())}
     save_json("vb_geo.json", geo)
 
     conf = df[df["confident"]].sort_values("vb_index")
@@ -259,6 +262,16 @@ def main():
     p[:, rf.classes_] = rf.predict_proba(lonlat[te_ok])
     geo["official_location_rf"] = {"acc": float((p.argmax(1) == y_all[te_ok]).mean() * 100), "auc": auc_macro_ovr(y_all[te_ok], p) * 100, "n_test": int(len(te_ok))}
     print("official split, location-only RF", geo["official_location_rf"], flush=True)
+    alla = df.sort_values("vb_index")  # same on every matched sample, confident or not
+    ia = alla["vb_index"].to_numpy()
+    tra, tea = ia[ia < ntr], ia[ia >= ntr]
+    ll = np.full((len(y_all), 2), np.nan)
+    ll[ia] = alla[["lon", "lat"]].to_numpy()
+    rf = RandomForestClassifier(500, random_state=0, n_jobs=-1).fit(ll[tra], y_all[tra])
+    p = np.zeros((len(tea), ncls))
+    p[:, rf.classes_] = rf.predict_proba(ll[tea])
+    geo["official_location_rf_all_matched"] = {"acc": float((p.argmax(1) == y_all[tea]).mean() * 100), "auc": auc_macro_ovr(y_all[tea], p) * 100, "n_test": int(len(tea))}
+    print("official split, location-only RF, all matched", geo["official_location_rf_all_matched"], flush=True)
 
     # ---- (D2) nearest-neighbour geolocation from the frozen features (official split, matched samples)
     geo["nn_geolocation"] = {}
