@@ -6,6 +6,7 @@
 \caption{VertiBench Satellite (16 parties, 4 classes, official test set of 785 samples). Upload: payload per training sample over the 16 parties (half precision; split learning: activations and gradients at every epoch of one training run). GFLOPs: party-side compute per image (split learning: 50 epochs of forward and backward passes of the VertiBench bottom model; frozen encoders: one forward pass). Time: minutes on one A100 for the party-side work (split learning: one training run; FedOnce: pre-training of the 16 encoders; frozen encoders: one pass over all training and test images of the 16 parties). Mean\,$\pm$\,sample std over 5 seeds (the test set is fixed).}\label{tab:main}
 \centering\scriptsize
 \setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}lcrrrccc@{}}
 \toprule
 Method & Bands & Upload & GFLOPs & Time & Acc. (\%) & F1 (\%) & AUC (\%)\\
@@ -13,6 +14,7 @@ Method & Bands & Upload & GFLOPs & Time & Acc. (\%) & F1 (\%) & AUC (\%)\\
 \inputtab{gen/tab_main.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{table}
 
 \paragraph{The reference is reproduced.}
@@ -31,6 +33,7 @@ Table~\ref{tab:encoders} compares nine frozen encoders under the same head. All 
 \caption{Frozen encoders on VertiBench (224\,px RGB, one upload, 5 seeds). Params in millions, GFLOPs per image, $d$ per party. Bottom: each party uploads two encoders' features side by side (features standardised).}\label{tab:encoders}
 \centering\scriptsize
 \setlength{\tabcolsep}{3.5pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}lrrrccc@{}}
 \toprule
 Encoder & Params & GFLOPs & $d$ & Acc. (\%) & F1 (\%) & Linear acc. (\%)\\
@@ -41,6 +44,7 @@ Encoder & Params & GFLOPs & $d$ & Acc. (\%) & F1 (\%) & Linear acc. (\%)\\
 \inputtab{gen/tab_combo_enc.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{table}
 
 \subsection{Classic split benchmarks}\label{sec:exp-classic}
@@ -49,6 +53,7 @@ Encoder & Params & GFLOPs & $d$ & Acc. (\%) & F1 (\%) & Linear acc. (\%)\\
 \caption{Classic split benchmarks: one upload of frozen features (224\,px, MLP head, 3 seeds) against the published numbers of methods that train the party models, under the same splits. CIFAR pieces are upsampled $\times7$; ModelNet40 uses 12 rendered views.}\label{tab:classic}
 \centering\scriptsize
 \setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}llp{4.3cm}cc@{}}
 \toprule
 Data & Split & Published (acc.\,\%) & DINOv2-g & CLIP-L\\
@@ -56,8 +61,10 @@ Data & Split & Published (acc.\,\%) & DINOv2-g & CLIP-L\\
 \inputtab{gen/tab_classic.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 
 \vspace{4pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}rcccc@{}}
 \toprule
 Aligned samples $N_o$ & Sun et al.\ one-shot & Sun et al.\ few-shot & DINOv2-g & CLIP-L\\
@@ -65,6 +72,7 @@ Aligned samples $N_o$ & Sun et al.\ one-shot & Sun et al.\ few-shot & DINOv2-g &
 \inputtab{gen/tab_sun.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{table}
 
 \paragraph{Large gains that mostly measure pre-training.}
@@ -79,6 +87,7 @@ Skin-lesion photographs are far from web-scale pre-training data, and there, tra
 \caption{The price of freezing on MILK10k (clinical + dermoscopic parties, 7 classes, 5-fold cross-validation, class-balanced loss). Split learning trains the party models (bottoms) with the label owner's gradients; one-shot rows use frozen features and an MLP head. Upload: per training sample and epoch for split learning, once for one-shot. Time: minutes per fold on one A100.}\label{tab:freeze}
 \centering\scriptsize
 \setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}llrrrccc@{}}
 \toprule
 Party models & Training & Trainable & Upload & Time & F1 (\%) & Bal.\ acc.\ (\%) & Acc.\ (\%)\\
@@ -86,6 +95,7 @@ Party models & Training & Trainable & Upload & Time & F1 (\%) & Bal.\ acc.\ (\%)
 \inputtab{gen/tab_freeze.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{table}
 
 \subsection{When does a second party help?}\label{sec:exp-complement}
@@ -94,6 +104,7 @@ Party models & Training & Trainable & Upload & Time & F1 (\%) & Bal.\ acc.\ (\%)
 \caption{MILK10k: macro F1 (\%) of one-shot heads on frozen features for every combination of parties (5 folds, class-balanced MLP head). Bottom: the usual practice of splitting one image into a left and a right party.}\label{tab:milk}
 \centering\scriptsize
 \setlength{\tabcolsep}{3.5pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}lcccc@{}}
 \toprule
 Parties & DINOv2-g & CLIP-L & BiomedCLIP & MONET\\
@@ -101,6 +112,7 @@ Parties & DINOv2-g & CLIP-L & BiomedCLIP & MONET\\
 \inputtab{gen/tab_milk.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{table}
 
 \paragraph{MILK10k: real modalities complement each other little.}
@@ -110,6 +122,7 @@ The dermoscopic image alone gives \milkGDerm\,\% macro F1 with DINOv2-g, the cli
 \caption{MILK10k: how the label owner combines the clinical (A) and dermoscopic (B) uploads (macro F1, \%, 5 folds). Late fusion: one head per party, log-probabilities averaged with a weight chosen on the validation fold. Branches: per-party projection, auxiliary per-party losses and modality dropout (0.3). Last column: share of test lesions misclassified by both single-party heads, and (in brackets) what it would be if their errors were independent.}\label{tab:milkfusion}
 \centering\scriptsize
 \setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}lcccccc@{}}
 \toprule
 Encoder & B alone & A+B concat & A+B late fusion & A+B branches & A+B+C branches & Both wrong (\%)\\
@@ -117,6 +130,7 @@ Encoder & B alone & A+B concat & A+B late fusion & A+B branches & A+B+C branches
 \inputtab{gen/tab_milkfusion.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{table}
 
 \paragraph{How the parties are combined matters as much as the encoder.}
@@ -126,6 +140,7 @@ A concatenation MLP under-uses the weaker party. Training one head per party and
 \caption{MILK10k, clinical + dermoscopic parties: is the concatenation head over-fitting? Macro F1 (\%, 5 folds). Top: regularising the concatenation head versus late fusion. Middle: image augmentation precomputed once by the parties (the 8 rotations and flips of each photograph). Bottom: gap between late fusion and concatenation when the training folds are subsampled.}\label{tab:milkreg}
 \centering\scriptsize
 \setlength{\tabcolsep}{3.5pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}lccc@{}}
 \toprule
 Head & DINOv2-g & CLIP-L & MONET\\
@@ -133,6 +148,7 @@ Head & DINOv2-g & CLIP-L & MONET\\
 \inputtab{gen/tab_milkreg.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{table}
 
 \paragraph{Over-fitting or modality competition?}
@@ -150,6 +166,7 @@ PENDING (Fig.~\ref{fig:ws}, Table~\ref{tab:wsfusion}).
 \caption{WorldStrat: making the Sentinel-2 party help (macro F1, \%, 5 folds, DINOv2-g). S2 vectors: number of 4{,}608-d vectors the Sentinel-2 party uploads per area (RGB, NIR and SWIR composites); all variants remain one-shot.}\label{tab:wsfusion}
 \centering\scriptsize
 \setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}lcccc@{}}
 \toprule
 Sentinel-2 summary / head & S2 vectors & IPCC & LCCS & SMOD\\
@@ -157,6 +174,7 @@ Sentinel-2 summary / head & S2 vectors & IPCC & LCCS & SMOD\\
 \inputtab{gen/tab_wsfusion.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{table}
 
 \subsection{Compression and missing parties}\label{sec:exp-compress}
@@ -188,6 +206,7 @@ The 16 VertiBench parties observe the same sensor at different dates and are lar
 \caption{Utility versus leakage of the upload format on VertiBench (DINOv2-g, 224\,px). Accuracy on the test set (5 seeds); PSNR and SSIM of the single-upload inversion; Re-id: share of the 12{,}560 test images whose reconstruction is closer to them than to any other (chance: 0.01\,\%); Joint: PSNR of the attack that sees the 16 uploads of a location. Clip + noise: the Gaussian mechanism of Sec.~\ref{sec:method}, per-upload $(\varepsilon, 10^{-5})$.}\label{tab:privacy}
 \centering\scriptsize
 \setlength{\tabcolsep}{3.5pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}lrccccc@{}}
 \toprule
 Upload format & Upload & Acc. (\%) & PSNR (dB) & SSIM & Re-id (\%) & Joint (dB)\\
@@ -195,6 +214,7 @@ Upload format & Upload & Acc. (\%) & PSNR (dB) & SSIM & Re-id (\%) & Joint (dB)\
 \inputtab{gen/tab_privacy.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{table}
 
 \paragraph{Inversion recovers colour, not layout.}
@@ -204,16 +224,18 @@ A decoder trained on public image--feature pairs reconstructs a test image from 
 Uploads can also be protected cryptographically if the head is linear, the case where encrypted training is mature (Sec.~\ref{sec:method}). On frozen features a linear head costs at most two points when the federation is small (Table~\ref{tab:he}): with two parties the closed-form ridge classifier on the full features is within 0.2 points of the MLP on CIFAR-10 and matches it on MILK10k with DINOv2-g (\heMilkGRidgeFull{} against \heMilkGMlp\,\% F1); the largest gaps are CIFAR-100 (1.4) and MILK10k with CLIP-L (2.1). The encrypted Gram matrix grows with the square of the total dimension, so a 16-party federation needs a per-party PCA first: on VertiBench, ridge after PCA-256 loses 1.6 points with DINOv2-g (\heVbGRidgeTf{} against \heVbGMlp\,\%) and 1.7 with CLIP-L; PCA-64 costs 2 to 5 points, and the logistic regression with a degree-3 polynomial sigmoid used by encrypted-training protocols~\cite{kim2018logistic} is not consistently better than ridge. We timed the CKKS operations of the ridge protocol with TenSEAL (ring degree 8192, one ciphertext per feature column): an encrypted inner product of two columns takes \hcVbStCtCt\,ms, so the 16-party Gram matrix needs \hcVbStServerH{} single-core hours at the label owner with PCA-16 and \hcVbSfServerH{} with PCA-64---an embarrassingly parallel computation---and the two-party MILK10k matrix with PCA-64 \hcMilkServer{} minutes. Each party encrypts its columns in under a second and uploads them once, \hcVbSfUp{} instead of \hcVbSfPlain{} in plain half precision with PCA-64 ($\times$\hcVbSfExpand), and the relative CKKS error stays below $10^{-5}$. Encrypted one-shot VFL with a linear head is therefore practical with a few dozen to a few hundred features per party, for a few points of accuracy; a cheap encrypted \emph{non-linear} head remains to be designed.
 
 \begin{table}[t]
-\caption{Heads that can be trained on encrypted uploads. Primary metric (accuracy on VertiBench and CIFAR, macro F1 otherwise), 5 seeds or folds. Ridge: closed form from $X^\top X$ and $X^\top Y$; poly-logistic: degree-3 polynomial sigmoid, fixed full-batch Nesterov steps; both after a per-party PCA to 256, 64 or 16 components (linear heads on standardised features).}\label{tab:he}
+\caption{Heads that can be trained on encrypted uploads. Accuracy on VertiBench (16 parties) and CIFAR (2 parties), macro F1 on MILK10k and WorldStrat (2 parties); mean\,$\pm$\,std over 5 seeds or folds (CIFAR: 3 seeds). Ridge: closed form from $X^\top X$ and $X^\top Y$; poly-logistic: degree-3 polynomial sigmoid, fixed full-batch Nesterov steps; both after a per-party PCA to 256, 64 or 16 components (linear heads on standardised features).}\label{tab:he}
 \centering\scriptsize
 \setlength{\tabcolsep}{1.8pt}
-\begin{tabular}{@{}llcccccccc@{}}
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{@{}lcccccccc@{}}
 \toprule
-& & \multicolumn{3}{c}{Full features} & \multicolumn{2}{c}{PCA-256} & \multicolumn{2}{c}{PCA-64} & PCA-16\\
-\cmidrule(lr){3-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}\cmidrule(lr){10-10}
-Task & Metric & MLP & Softmax & Ridge & Ridge & Poly-log. & Ridge & Poly-log. & Ridge\\
+& \multicolumn{3}{c}{Full features} & \multicolumn{2}{c}{PCA-256} & \multicolumn{2}{c}{PCA-64} & PCA-16\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}\cmidrule(lr){9-9}
+Task & MLP & Softmax & Ridge & Ridge & Poly-log. & Ridge & Poly-log. & Ridge\\
 \midrule
 \inputtab{gen/tab_he.tex}
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{table}
