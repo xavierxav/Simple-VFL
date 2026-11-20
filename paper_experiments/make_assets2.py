@@ -655,7 +655,8 @@ if os.path.exists(npz) and inv:
 # ------------------------------------------------------------------ linear / encryption-friendly heads
 HEDS = [("vertibench/dinov2_g_224", "VertiBench, DINOv2-g", 16), ("vertibench/clip_l14_224", "VertiBench, CLIP-L", 16),
         ("milk10k/dinov2_g", "MILK10k, DINOv2-g", 2), ("milk10k/clip_l14", "MILK10k, CLIP-L", 2),
-        ("worldstrat_ipcc_1.5m_S2MS", "WorldStrat IPCC, DINOv2-g", 2), ("cifar10_dinov2_g_topbottom", "CIFAR-10 top/bottom, DINOv2-g", 2)]
+        ("worldstrat_ipcc_1.5m_S2MS", "WorldStrat IPCC, DINOv2-g", 2), ("cifar10_dinov2_g_topbottom", "CIFAR-10 top/bottom, DINOv2-g", 2),
+        ("cifar100_dinov2_g_topbottom", "CIFAR-100 top/bottom, DINOv2-g", 2)]
 rows = []
 for key, lab, k in HEDS:
     r = he.get(key)
@@ -664,13 +665,13 @@ for key, lab, k in HEDS:
     met = "f1" if r["metric"] == "f1" else "acc"
     full = r.get("full", {})
     p256, p64, p16 = r.get("pca256", {}), r.get("pca64", {}), r.get("pca16", {})
-    cells = [pm(full.get("mlp2"), met), pm(full.get("linear_softmax"), met), pm(p256.get("ridge"), met), pm(p256.get("polylogistic"), met),
+    cells = [pm(full.get("mlp2"), met), pm(full.get("linear_softmax"), met), pm(full.get("ridge"), met), pm(p256.get("ridge"), met), pm(p256.get("polylogistic"), met),
              pm(p64.get("ridge"), met), pm(p64.get("polylogistic"), met), pm(p16.get("ridge"), met)]
     rows.append(f"{lab} & {'F1' if met == 'f1' else 'acc.'} & " + " & ".join(cells) + " \\\\")
     t = key.replace("/", "").replace("_", "").replace("224", "").replace("dinov2g", "G").replace("clipl14", "C").replace("vertibench", "Vb").replace("milk10k", "Milk")
     t = "".join(ch for ch in t if ch.isalpha())[:14]
     for h, hd, tag in (("mlp2", full, "Mlp"), ("linear_softmax", full, "Lin"), ("ridge", p64, "RidgeSf"), ("polylogistic", p64, "PolySf"), ("mlp2", p64, "MlpSf"),
-                       ("ridge", p16, "RidgeSt"), ("ridge", p256, "RidgeTf"), ("polylogistic", p256, "PolyTf"), ("mlp2", p256, "MlpTf")):
+                       ("ridge", p16, "RidgeSt"), ("ridge", p256, "RidgeTf"), ("polylogistic", p256, "PolyTf"), ("mlp2", p256, "MlpTf"), ("ridge", full, "RidgeFull")):
         s = hd.get(h)
         if s:
             macro(f"he{t}{tag}", f1(s[met]))
