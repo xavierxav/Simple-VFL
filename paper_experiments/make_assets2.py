@@ -74,7 +74,12 @@ Ec = load("vb224_controls_clip_l14.json") or {}
 Eold = load("vb_controls.json") or {}
 pool = load("vb224_pooling.json")
 inv = load("vb224_inversion.json")
-he = load("he_heads.json") or {}
+he = {}
+for _f in sorted(os.listdir(RES)) if os.path.isdir(RES) else []:
+    if _f.startswith("he_heads") and _f.endswith(".json"):
+        _d = load(_f)
+        he.setdefault("he_cost", {}).update(_d.pop("he_cost", {}))
+        he.update(_d)
 milk = load("milk_heads.json")
 msplit = load("milk_split.json") or {}
 cls = load("classic.json") or {}
@@ -613,13 +618,14 @@ for key, lab, k in HEDS:
         continue
     met = "f1" if r["metric"] == "f1" else "acc"
     full = r.get("full", {})
-    p64, p16 = r.get("pca64", {}), r.get("pca16", {})
-    cells = [pm(full.get("mlp2"), met), pm(full.get("linear_softmax"), met), pm(full.get("ridge"), met) if "ridge" in full else "--",
-             pm(p64.get("mlp2"), met), pm(p64.get("ridge"), met), pm(p64.get("polylogistic"), met), pm(p16.get("ridge"), met)]
+    p256, p64, p16 = r.get("pca256", {}), r.get("pca64", {}), r.get("pca16", {})
+    cells = [pm(full.get("mlp2"), met), pm(full.get("linear_softmax"), met), pm(p256.get("ridge"), met), pm(p256.get("polylogistic"), met),
+             pm(p64.get("ridge"), met), pm(p64.get("polylogistic"), met), pm(p16.get("ridge"), met)]
     rows.append(f"{lab} & {'F1' if met == 'f1' else 'acc.'} & " + " & ".join(cells) + " \\\\")
     t = key.replace("/", "").replace("_", "").replace("224", "").replace("dinov2g", "G").replace("clipl14", "C").replace("vertibench", "Vb").replace("milk10k", "Milk")
     t = "".join(ch for ch in t if ch.isalpha())[:14]
-    for h, hd, tag in (("mlp2", full, "Mlp"), ("linear_softmax", full, "Lin"), ("ridge", p64, "RidgeSf"), ("polylogistic", p64, "PolySf"), ("mlp2", p64, "MlpSf"), ("ridge", p16, "RidgeSt")):
+    for h, hd, tag in (("mlp2", full, "Mlp"), ("linear_softmax", full, "Lin"), ("ridge", p64, "RidgeSf"), ("polylogistic", p64, "PolySf"), ("mlp2", p64, "MlpSf"),
+                       ("ridge", p16, "RidgeSt"), ("ridge", p256, "RidgeTf"), ("polylogistic", p256, "PolyTf"), ("mlp2", p256, "MlpTf")):
         s = hd.get(h)
         if s:
             macro(f"he{t}{tag}", f1(s[met]))
@@ -629,11 +635,14 @@ for key, tag in (("milk10k/dinov2_g/pca64", "Milk"), ("vertibench/dinov2_g_224/p
     c = hc.get(key)
     if c:
         macro(f"hc{tag}Server", f"{c['extrapolated_secs_server'] / 60:.0f}")
-        macro(f"hc{tag}Enc", f"{c['extrapolated_secs_encrypt_per_party']:.0f}")
+        macro(f"hc{tag}Enc", f"{c['extrapolated_secs_encrypt_per_party']:.1f}")
         macro(f"hc{tag}Up", size(c["upload_bytes_per_party"]))
         macro(f"hc{tag}Plain", size(c["plain_fp16_bytes_per_party"]))
         macro(f"hc{tag}Err", f"{c['max_rel_error']:.0e}")
         macro(f"hc{tag}CtCt", f"{c['secs_ctct_inner_product'] * 1000:.0f}")
+        macro(f"hc{tag}ServerH", f"{c['extrapolated_secs_server'] / 3600:.1f}")
+        macro(f"hc{tag}Expand", f"{c['upload_bytes_per_party'] / c['plain_fp16_bytes_per_party']:.0f}")
+        macro(f"hc{tag}Agg", size(c["aggregate_bytes_round_trip"]))
 
 # ------------------------------------------------------------------ placeholders, so that the paper compiles on partial results
 for t in ("tab_main", "tab_encoders", "tab_combo_enc", "tab_classic", "tab_sun", "tab_milk", "tab_milkfusion", "tab_freeze", "tab_ws", "tab_wsfusion",

@@ -12,7 +12,7 @@ This stage measures (plaintext emulation, exact up to CKKS rounding) the accurac
 linear head and the MLP head, for several PCA sizes, on every data set whose features are cached; and (if TenSEAL is
 available) the real CKKS cost of protocol (a): encryption, homomorphic Gram / X^T Y, upload size, and the decryption
 error, on one complete configuration plus per-operation timings for extrapolation.
-Output: he_heads.json
+Output: he_heads.json (he_heads_milk.json / he_heads_ws.json on the MILK10k / WorldStrat VMs)
 """
 
 import json
@@ -269,7 +269,9 @@ def he_cost(parties, y, tr, d, C, n_time=32):
 
 
 def main():
-    path = os.path.join(OUT, "he_heads.json")
+    # one file per VM, so that fetching the results of several VMs into paper_results/ does not overwrite them
+    FN = os.environ.get("PE_HE_OUT") or ("he_heads_milk.json" if os.path.isdir("/content/milk") else "he_heads_ws.json" if os.path.isdir("/content/ws2") else "he_heads.json")
+    path = os.path.join(OUT, FN)
     res = json.load(open(path)) if os.path.exists(path) else {}
     cands = {f"vertibench/{e}": (lambda e=e: ds_vertibench(e)) for e in ("dinov2_g_224", "clip_l14_224")}
     cands.update({f"milk10k/{e}": (lambda e=e: ds_milk(e)) for e in ("dinov2_g", "clip_l14")})
@@ -282,7 +284,7 @@ def main():
         if ds is None:
             continue
         res[name] = evaluate_dataset(name, ds)
-        save_json("he_heads.json", res)
+        save_json(FN, res)
     try:
         import tenseal  # noqa: F401
     except Exception:
@@ -300,13 +302,13 @@ def main():
             parties, y, splits, _ = ds
             res["he_cost"][f"{name}/pca{d}"] = he_cost(parties, y, splits[0][0], d, int(y.max()) + 1)
             print("HE cost", name, d, res["he_cost"][f"{name}/pca{d}"], flush=True)
-            save_json("he_heads.json", res)
+            save_json(FN, res)
     except Exception as e:
         import traceback
 
         traceback.print_exc()
         res["he_cost_error"] = repr(e)
-    save_json("he_heads.json", res)
+    save_json(FN, res)
     print("DONE", flush=True)
 
 
