@@ -295,6 +295,45 @@ if mf:
             for k2, tag in (("both_wrong", "Both"), ("both_wrong_if_independent", "Indep"), ("oracle_acc", "Oracle"), ("err_a", "ErrClin"), ("err_b", "ErrDerm")):
                 macro(f"mf{t}{tag}", f1(d[k2]))
     write("tab_milkfusion.tex", "\n".join(rows))
+# MILK10k: over-fitting or modality competition? (s19)
+mr = load("milk_reg.json")
+if mr:
+    EN = [e for e in ("dinov2_g", "clip_l14", "monet") if e in mr]
+    RR = [("concat", "concat MLP"), ("concat + input dropout 0.5", "\\quad + input dropout 0.5"), ("concat + feature noise 0.5", "\\quad + Gaussian feature noise"),
+          ("concat + feature mixup 0.4", "\\quad + feature mixup"), ("concat + PCA-256 per party", "\\quad + PCA-256 per party"),
+          ("late fusion (weight on val)", "late fusion, weight tuned on validation"), ("late fusion (fixed 0.5)", "late fusion, fixed weight 0.5"), None,
+          ("concat|views mean", "concat MLP, mean of 8 views (upload $\\times$1)"), ("concat|views sampled (x8 upload)", "concat MLP, 8 views sampled (upload $\\times$8)"),
+          ("late fusion (fixed 0.5)|views mean", "late fusion, mean of 8 views (upload $\\times$1)")]
+    rows = []
+    for r in RR:
+        if r is None:
+            rows.append("\\midrule")
+            continue
+        k, lab = r
+        rows.append(f"{lab} & " + " & ".join(pm(mr[e].get(k), "f1") for e in EN) + " \\\\")
+    rows.append("\\midrule")
+    for fr, lab in (("frac0.25", "25\\,\\%"), ("frac0.5", "50\\,\\%"), ("", "100\\,\\%")):
+        cells = []
+        for e in EN:
+            a = mr[e].get("late fusion (fixed 0.5)" + (f"|{fr}" if fr else ""))
+            b = mr[e].get("concat" + (f"|{fr}" if fr else ""))
+            cells.append(f"{a['f1'] - b['f1']:+.1f}" if a and b else "--")
+        rows.append(f"late $-$ concat, {lab} of the training folds & " + " & ".join(cells) + " \\\\")
+    write("tab_milkreg.tex", "\n".join(rows))
+    for e, t in (("dinov2_g", "G"), ("clip_l14", "C"), ("monet", "M")):
+        r = mr.get(e, {})
+        for k, tag in (("concat", "Cat"), ("concat + input dropout 0.5", "Drop"), ("concat + feature mixup 0.4", "Mix"), ("concat + feature noise 0.5", "Noise"),
+                       ("concat + PCA-256 per party", "Pca"), ("late fusion (weight on val)", "Late"), ("late fusion (fixed 0.5)", "LateHalf"),
+                       ("concat|views mean", "CatViews"), ("concat|views sampled (x8 upload)", "CatSampled"), ("late fusion (fixed 0.5)|views mean", "LateViews"),
+                       ("derm|views mean", "DermViews"), ("clin|views mean", "ClinViews")):
+            if k in r:
+                macro(f"mr{t}{k and tag}", f1(r[k]["f1"]))
+        for fr, tag in (("frac0.25", "Q"), ("frac0.5", "H"), ("", "F")):
+            a = r.get("late fusion (fixed 0.5)" + (f"|{fr}" if fr else ""))
+            b = r.get("concat" + (f"|{fr}" if fr else ""))
+            if a and b:
+                macro(f"mr{t}Gap{tag}", f"{a['f1'] - b['f1']:+.1f}")
+
 # price of freezing (MILK10k, clinical + dermoscopic)
 FZ = [("resnet18", "ResNet-18, scratch", "split"), ("resnet18_in", "ResNet-18, ImageNet", "split"), ("dinov2_b_lora", "DINOv2-B, LoRA", "split"),
       ("dinov2_b_ft", "DINOv2-B, fine-tuned", "split"), ("clip_b16_lora", "CLIP-B, LoRA", "split"),
@@ -645,7 +684,7 @@ for key, tag in (("milk10k/dinov2_g/pca64", "Milk"), ("vertibench/dinov2_g_224/p
         macro(f"hc{tag}Agg", size(c["aggregate_bytes_round_trip"]))
 
 # ------------------------------------------------------------------ placeholders, so that the paper compiles on partial results
-for t in ("tab_main", "tab_encoders", "tab_combo_enc", "tab_classic", "tab_sun", "tab_milk", "tab_milkfusion", "tab_freeze", "tab_ws", "tab_wsfusion",
+for t in ("tab_main", "tab_encoders", "tab_combo_enc", "tab_classic", "tab_sun", "tab_milk", "tab_milkfusion", "tab_milkreg", "tab_freeze", "tab_ws", "tab_wsfusion",
           "tab_pareto", "tab_privacy", "tab_he"):
     if not os.path.exists(os.path.join(OUT, t + ".tex")):
         write(t + ".tex", "\\multicolumn{2}{@{}l}{(pending)}\\\\")

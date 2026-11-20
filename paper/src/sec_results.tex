@@ -121,6 +121,22 @@ Encoder & B alone & A+B concat & A+B late fusion & A+B branches & A+B+C branches
 \paragraph{How the parties are combined matters as much as the encoder.}
 A concatenation MLP under-uses the weaker party. Training one head per party and averaging their log-probabilities (late fusion) is better for every encoder (Table~\ref{tab:milkfusion}): \mfGLate\,\% instead of \mfGCat\,\% with DINOv2-g, \mfCLate\,\% instead of \mfCCat\,\% with CLIP-L, \mfGMLate\,\% when each party uploads DINOv2-g and MONET features; the clinical photograph then adds about three points to the dermoscopy. Late fusion also suits VFL: each party's head can be trained, audited and dropped independently. The gain is bounded by the data: \mfGBoth\,\% of the lesions are misclassified by both single-party heads, against \mfGIndep\,\% if their errors were independent---the two modalities fail on the same, intrinsically hard lesions.
 
+\begin{table}[t]
+\caption{MILK10k, clinical + dermoscopic parties: is the concatenation head over-fitting? Macro F1 (\%, 5 folds). Top: regularising the concatenation head versus late fusion. Middle: image augmentation precomputed once by the parties (the 8 rotations and flips of each photograph). Bottom: gap between late fusion and concatenation when the training folds are subsampled.}\label{tab:milkreg}
+\centering\scriptsize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Head & DINOv2-g & CLIP-L & MONET\\
+\midrule
+\inputtab{gen/tab_milkreg.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Over-fitting or modality competition?}
+With 3{,}100 training lesions and 2--3k input dimensions, the concatenation head could simply over-fit. Three observations speak against this being the main cause (Table~\ref{tab:milkreg}). Regularising it---input dropout, Gaussian feature noise, feature mixup, a per-party PCA---gains at most \emph{one} point and never reaches late fusion. Late fusion does not need its tuned weight: a fixed weight of 0.5 does as well (\mrGLateHalf\,\% with DINOv2-g), so its advantage is not a by-product of tuning on the validation F1. And its advantage does not shrink with more data, as over-fitting would predict; it grows from 25\,\% to 100\,\% of the training folds for CLIP-L and MONET. The pattern rather matches the \emph{modality competition} documented for jointly trained multimodal networks~\cite{wang2020makes,huang2022modality,peng2022balanced}: a joint head learns the dominant dermoscopy first and stops (by early stopping) before exploiting the clinical photograph, whereas separate heads must each use their own modality fully---the fused models give the clinical party almost equal weight although it is the weaker one. Data augmentation helps in image space, not in feature space: the parties can encode the 8 rotations and flips of each photograph once (8 times the encoding cost, a few GPU-minutes) and upload the mean, which raises late fusion to \mrGLateViews\,\% (DINOv2-g) and \mrMLateViews\,\% (MONET) at no extra communication.
+
 \paragraph{WorldStrat: two sensors, three labels.}
 PENDING (Fig.~\ref{fig:ws}, Table~\ref{tab:wsfusion}).
 
