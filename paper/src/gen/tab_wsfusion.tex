@@ -1,1 +1,21 @@
-\multicolumn{2}{@{}l}{(pending)}\\
+SPOT, full area & -- & 62.0\,{\scriptsize$\pm$6.3} & 43.1\,{\scriptsize$\pm$2.6} & 37.4\,{\scriptsize$\pm$2.5} \\
+SPOT, mean of 16 tiles at full resolution & -- & 63.9\,{\scriptsize$\pm$4.7} & 44.2\,{\scriptsize$\pm$2.5} & 36.1\,{\scriptsize$\pm$2.9} \\
+SPOT, centre 1\,km & -- & 59.8\,{\scriptsize$\pm$5.0} & 40.7\,{\scriptsize$\pm$3.8} & 33.9\,{\scriptsize$\pm$2.5} \\
+SPOT, centre 336\,m & -- & 52.2\,{\scriptsize$\pm$2.9} & 35.5\,{\scriptsize$\pm$0.9} & 29.1\,{\scriptsize$\pm$2.0} \\
+SPOT, full area and centre 336\,m & -- & 57.7\,{\scriptsize$\pm$4.2} & 40.2\,{\scriptsize$\pm$2.6} & 37.0\,{\scriptsize$\pm$1.3} \\
+\midrule
+S2, mean of revisits & 1 & 61.8\,{\scriptsize$\pm$3.5} & 44.3\,{\scriptsize$\pm$1.8} & 35.8\,{\scriptsize$\pm$2.1} \\
+S2, mean and temporal std & 2 & 65.3\,{\scriptsize$\pm$3.3} & 46.2\,{\scriptsize$\pm$2.9} & 35.7\,{\scriptsize$\pm$1.3} \\
+S2, 16 revisits, shared-weight set head & 16 & 58.9\,{\scriptsize$\pm$2.9} & 42.6\,{\scriptsize$\pm$3.6} & 33.9\,{\scriptsize$\pm$3.0} \\
+\midrule
+concat MLP, S2 mean & 1 & 64.7\,{\scriptsize$\pm$4.2} & 47.2\,{\scriptsize$\pm$1.8} & 37.3\,{\scriptsize$\pm$3.4} \\
+concat MLP, S2 mean and std & 2 & 65.3\,{\scriptsize$\pm$3.6} & 48.1\,{\scriptsize$\pm$3.1} & 34.8\,{\scriptsize$\pm$1.5} \\
+concat MLP, S2 mean of 8 clearest (C) & 1 & 62.9\,{\scriptsize$\pm$3.8} & 45.0\,{\scriptsize$\pm$3.1} & 36.5\,{\scriptsize$\pm$2.6} \\
+C, PCA-256 per party & 1 & 66.0\,{\scriptsize$\pm$4.4} & 44.3\,{\scriptsize$\pm$2.4} & 36.3\,{\scriptsize$\pm$2.3} \\
+C, late fusion & 1 & 65.1\,{\scriptsize$\pm$5.0} & 45.8\,{\scriptsize$\pm$3.0} & 38.0\,{\scriptsize$\pm$3.0} \\
+C, branches, aux.\ losses, modality dropout & 1 & 64.0\,{\scriptsize$\pm$3.3} & 45.0\,{\scriptsize$\pm$3.7} & 37.5\,{\scriptsize$\pm$0.5} \\
+S2 by shared-weight set head (16 revisits) & 16 & 63.9\,{\scriptsize$\pm$3.8} & 43.6\,{\scriptsize$\pm$3.8} & 35.0\,{\scriptsize$\pm$1.8} \\
+\midrule
+full area and centre, late fusion & 1 & 59.3\,{\scriptsize$\pm$4.4} & 42.8\,{\scriptsize$\pm$3.1} & 37.9\,{\scriptsize$\pm$1.6} \\
+3 scales per party, concat MLP & 3 & 62.8\,{\scriptsize$\pm$6.0} & 44.9\,{\scriptsize$\pm$3.3} & 36.2\,{\scriptsize$\pm$3.9} \\
+3 scales per party, late fusion & 3 & 60.9\,{\scriptsize$\pm$3.1} & 44.5\,{\scriptsize$\pm$3.0} & 37.9\,{\scriptsize$\pm$2.7} \\
