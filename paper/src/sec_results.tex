@@ -1,14 +1,14 @@
 \section{Results}\label{sec:results}
 
-\subsection{Frozen features versus end-to-end training}\label{sec:exp-main}
+\subsection{Accuracy and cost against trained VFL methods}\label{sec:exp-main}
 
 \begin{table}[t]
-\caption{VertiBench Satellite (16 parties, 4 classes, official test set of 785 samples). Upload: payload per training sample over the 16 parties (half precision; split learning: activations and gradients at every epoch). Time: minutes on one A100-40GB for the party-side work, data loading included (split learning: one training run; SimCLR: pre-training of the 16 encoders; frozen encoders: one forward pass over all training and test images of the 16 parties). Mean\,$\pm$\,sample std over 5 seeds (the test set is fixed).}\label{tab:main}
+\caption{VertiBench Satellite (16 parties, 4 classes, official test set of 785 samples). Upload: payload per training sample over the 16 parties (half precision; split learning: activations and gradients at every epoch of one training run). GFLOPs: party-side compute per image (split learning: 50 epochs of forward and backward passes of the VertiBench bottom model; frozen encoders: one forward pass). Time: minutes on one A100 for the party-side work (split learning: one training run; FedOnce: pre-training of the 16 encoders; frozen encoders: one pass over all training and test images of the 16 parties). Mean\,$\pm$\,sample std over 5 seeds (the test set is fixed).}\label{tab:main}
 \centering\scriptsize
-\setlength{\tabcolsep}{3.5pt}
-\begin{tabular}{@{}lcrccr@{}}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lcrrrccc@{}}
 \toprule
-Method & Bands & Upload / sample & Acc. (\%) & AUC (\%) & Time\\
+Method & Bands & Upload & GFLOPs & Time & Acc. (\%) & F1 (\%) & AUC (\%)\\
 \midrule
 \inputtab{gen/tab_main.tex}
 \bottomrule
@@ -16,69 +16,159 @@ Method & Bands & Upload / sample & Acc. (\%) & AUC (\%) & Time\\
 \end{table}
 
 \paragraph{The reference is reproduced.}
-Our re-implementation of the published VertiBench configuration reaches $\reproAcc\pm\reproStd$\,\% on the 13 bands after its last epoch, in line with the published $81.2\pm0.4$\,\% (picking the best epoch on the test set would give \reproBest\,\%). Our own split-learning recipe is weaker from scratch ($77.8$\,\% on 13 bands, $77.7$\,\% on RGB) and reaches \splitPTAcc\,\% with ImageNet-initialised bottoms on RGB; the SimCLR variant of FedOnce reaches $78.5$\,\% (13 bands) and $77.6$\,\% (RGB). For these trained-from-scratch baselines the ten extra bands change accuracy by less than one point (AUC: $+1.4$ for SplitNN).
+Our re-implementation of the published VertiBench split-learning configuration reaches $\reproAcc\pm\reproStd$\,\% on the 13 bands after its last epoch, in line with the published $81.2\pm0.4$\,\% (Table~\ref{tab:main}). Our own split-learning recipe is weaker from scratch (\splitAllAcc\,\% on 13 bands, \splitRGBAcc\,\% on RGB), and so is FedOnce, whose parties learn their encoder without labels (\sslAllAcc\,\% for its SimCLR variant). PENDING: FedOnce with Noise As Targets; SplitNN from ImageNet weights.
 
-\paragraph{One upload of frozen RGB features.}
-With RGB input, no party-side training and a single upload, frozen DINOv2 ViT-g/14 reaches $84.2$\,\% at 224\,px and CLIP ViT-L/14 $85.2$\,\%. The difference between two independent accuracies on 785 samples has a 95\,\% interval of about $\pm3.9$ points: against the reproduced SplitNN, CLIP's $+4.2$ points are at the edge of significance and DINOv2-g's $+3.2$ are not, whereas both are clearly above our other baselines. ~PRETRAINING-SENTENCE~ The costs differ in nature: the reproduced SplitNN exchanges activations and gradients at every one of its 50 epochs (1.56\,MiB per training sample) and needs \reproMin{} A100-minutes per training run, to be paid again for every re-training; the frozen encoders need one forward pass of every image (\timeG{} A100-minutes for DINOv2-g over all parties, training and test images, \timeClip{} for CLIP), one upload of 32--48\,KiB per sample, and a head that trains in seconds. At equal input (RGB), the encoder pass costs about as much as one run of our faster split-learning recipe (\splitRGBMin{} minutes), but only once.
+\paragraph{One upload of frozen features is more accurate.}
+With RGB input only, no party-side training and a single upload, every foundation encoder of Table~\ref{tab:main} reaches at least 82\,\%: \vbClipAcc\,\% for CLIP ViT-L/14 and \vbGAcc\,\% for DINOv2 ViT-g/14, i.e.\ 3 to 4 points above the reproduced split-learning reference, with the same ranking in macro F1 and AUC. The two encoders are statistically indistinguishable: on the same test predictions (seed-averaged probabilities), CLIP-L leads by \pairDiff{} points, 95\,\% bootstrap interval $[\pairLo, \pairHi]$, McNemar $p=\pairP$.
 
-\paragraph{A geographic task.}
-A random forest on the recovered coordinates reaches \locRFofficial\,\% on the official split, more than any image model: the provider label of VertiBench is largely a location label, and Table~\ref{tab:main} partly ranks how well each method recognises the region. The next section separates the two.
+\paragraph{What it costs.}
+The cost differs in nature, not only in amount. Split learning exchanges activations and gradients at every one of its 50 epochs, 1.56\,MiB per training sample, and needs all 16 parties online and synchronised for the \reproMin{} minutes of each training run, to be paid again for every re-training. The frozen pipeline needs one forward pass of every image and one upload of 24--48\,KiB per sample (256\,B after compression, Sec.~\ref{sec:exp-compress}); the head trains in seconds at the label owner. In FLOPs, a large encoder is \emph{not} cheaper than training a small bottom model: one DINOv2-g pass costs \vbGGF{} GFLOPs per image, more than the \rEighteenTrainGF{} GFLOPs of 50 training epochs of the VertiBench ResNet-18 bottom. A small encoder is: CLIP ViT-B/16 costs \vbClipBGF{} GFLOPs, ten times less than training, for \vbClipBAcc\,\%. In wall-clock time, encoding all images of the 16 parties takes \vbGMin{} minutes with DINOv2-g and \vbClipBMin{} with CLIP-B on one A100.
 
-\subsection{Why does CLIP beat DINOv2? Resolution and geography}\label{sec:exp-why}
+\paragraph{The choice of encoder changes a few points.}
+Table~\ref{tab:encoders} compares nine frozen encoders under the same head. All pre-trained ViTs lie between 81.6 and 85.2\,\%, a supervised ImageNet ResNet-50 reaches 80.9\,\%, and a randomly initialised ViT-B only 75.1\,\%: the gain comes from pre-training, not from the head. Size matters little (DINOv2 ViT-S/14: 81.8\,\%, ViT-g/14: 84.2\,\%; CLIP ViT-B/16 is within one point of ViT-L/14). Parties may also upload the features of two encoders side by side: CLIP-L with CLIP-B reaches \comboLB\,\%, DINOv2-g with CLIP-L \comboGL\,\%, a small gain for a larger upload. The encoder is therefore a parameter of the method, chosen for cost; our code takes it as an argument.
 
 \begin{table}[t]
-\caption{Frozen encoders on VertiBench: official split (5 seeds), nearest-neighbour geolocation of the test samples from their features (median error and share within 100\,km), and five-fold cross-validation of the pooled samples with recovered coordinates, random vs.\ spatial (test set changes with the fold). Accuracy and macro AUC in \%, mean\,$\pm$\,sample std.}\label{tab:encoders}
+\caption{Frozen encoders on VertiBench (224\,px RGB, one upload, 5 seeds). Params in millions, GFLOPs per image, $d$ per party. Bottom: each party uploads two encoders' features side by side (features standardised).}\label{tab:encoders}
 \centering\scriptsize
-\setlength{\tabcolsep}{2.4pt}
-\begin{tabular}{@{}lcrrcccc@{}}
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lrrrccc@{}}
 \toprule
- & Official & \multicolumn{2}{c}{Geolocation} & \multicolumn{2}{c}{Random 5-fold CV} & \multicolumn{2}{c}{Spatial 5-fold CV}\\
-\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
-Encoder & Acc. & km & $<$100\,km & Acc. & AUC & Acc. & AUC\\
+Encoder & Params & GFLOPs & $d$ & Acc. (\%) & F1 (\%) & Linear acc. (\%)\\
 \midrule
 \inputtab{gen/tab_encoders.tex}
+\midrule
+\multicolumn{7}{@{}l}{\emph{Each party uploads two encoders' features (standardised)}}\\
+\inputtab{gen/tab_combo_enc.tex}
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:encoders} tests three explanations of the CLIP--DINOv2 gap observed in our first extraction (85.2 vs.\ 82.6\,\%).
+\subsection{Classic split benchmarks}\label{sec:exp-classic}
 
-\paragraph{Input resolution explains most of it.}
-That extraction fed DINOv2 $168$-px images ($12\times12$ patches) and CLIP $224$-px images. At 224\,px, DINOv2-g gains 1.6 points ($84.2$\,\%; paired difference \pairGsvGlDiff{} points, McNemar $p=\pairGsvGlP$), whereas CLIP loses only 0.3 points at 168\,px; the remaining gap to CLIP is 1.0 point on the official split (paired: \pairCvGlDiff{} points, 95\,\% bootstrap interval [\pairCvGlLo, \pairCvGlHi], $p=\pairCvGlP$) and 0.1 point under random cross-validation. Concatenating the mean patch token to the class token adds 0.5 points. Resizing choices matter for remote-sensing benchmarks~\cite{corley2024resizing}, and they matter here more than the choice between the two best encoders. Image--text pre-training alone is not the answer either: SigLIP-B/16 ($81.6$\,\%) is below CLIP-B/16 ($84.4$\,\%).
+\begin{table}[t]
+\caption{Classic split benchmarks: one upload of frozen features (224\,px, MLP head, 3 seeds) against the published numbers of methods that train the party models, under the same splits. CIFAR pieces are upsampled $\times7$; ModelNet40 uses 12 rendered views.}\label{tab:classic}
+\centering\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llp{4.3cm}cc@{}}
+\toprule
+Data & Split & Published (acc.\,\%) & DINOv2-g & CLIP-L\\
+\midrule
+\inputtab{gen/tab_classic.tex}
+\bottomrule
+\end{tabular}
 
-\paragraph{The features know where the images were taken.}
-Predicting the location of a test sample by that of its nearest training sample in feature space gives a median error of 569\,km with CLIP-L, 808\,km with DINOv2-g at 224\,px and 4{,}032\,km with random weights. Across the nine encoders, accuracy on the official split follows this geolocation ability almost monotonically (Spearman $\rho=\geoSpearman$), as expected for a geographic label, and CLIP features geolocate best, consistently with the strength of CLIP-based image geolocators~\cite{haas2023streetclip,haas2024pigeon,vivanco2023geoclip}.
+\vspace{4pt}
+\begin{tabular}{@{}rcccc@{}}
+\toprule
+Aligned samples $N_o$ & Sun et al.\ one-shot & Sun et al.\ few-shot & DINOv2-g & CLIP-L\\
+\midrule
+\inputtab{gen/tab_sun.tex}
+\bottomrule
+\end{tabular}
+\end{table}
 
-\paragraph{But they also carry more than location.}
-Under random cross-validation of the pooled samples, coordinates alone reach $91.4$\,\%, above every encoder ($75.8$--$86.0$\,\%). Under spatial cross-validation they fall to the level of the training majority class ($61.1$ vs.\ $60.6$\,\%, AUC $58.4$), whereas the frozen features keep $69$--$74$\,\% accuracy and $73$--$77$\,\% AUC (random weights: $63.6$\,\% and $64.0$). The spread across spatial folds is large (the majority class covers 44--88\,\% of a test fold), but within folds the ranking is stable: CLIP-L stays ahead of DINOv2-g at 224\,px ($+1.7$ points on all five folds, $+2.1$ AUC on three), so its small advantage is not only region recognition. The absolute accuracies of Table~\ref{tab:main}, however, overstate what any of these models would achieve in a new region by more than 10 points.
+\paragraph{Large gains that mostly measure pre-training.}
+On the splits used by VFLAIR, FedOnce and Sun et al., frozen DINOv2-g features beat every published number by a wide margin (Table~\ref{tab:classic}): \cTenGTwo\,\% on CIFAR-10 cut into top and bottom halves (VFLAIR's split learning: 79.8\,\%), \cTenGFour\,\% with four quadrants (VFLAIR: 76.2\,\%, FedOnce: 58.7\,\%), and \sunA\,\% with only 256 aligned labelled samples, where the semi-supervised three-message protocol of Sun et al.\ reaches 78--80\,\%. PENDING: CIFAR-100, ModelNet40. These gains should not be over-interpreted: CIFAR's classes are central to web-scale pre-training data, so a split CIFAR benchmark mostly measures the encoder's pre-training. The splits also create complementarity by construction: one CIFAR-10 quadrant alone gives \cTenGSoloQ\,\%, the four together \cTenGFour\,\%, whereas real parties often see the same object almost completely (Sec.~\ref{sec:exp-complement}). This is why the rest of the paper uses naturally partitioned data.
 
-\subsection{How little needs to be sent?}\label{sec:exp-pareto}
+\subsection{The price of freezing}\label{sec:exp-freeze}
+
+PENDING: MILK10k split learning with the same backbones (Table~\ref{tab:freeze}).
+
+\begin{table}[t]
+\caption{The price of freezing on MILK10k (clinical + dermoscopic parties, 7 classes, 5-fold cross-validation, class-balanced loss). Split learning trains the party models (bottoms) with the label owner's gradients; one-shot rows use frozen features and an MLP head. Upload: per training sample and epoch for split learning, once for one-shot. Time: minutes per fold on one A100.}\label{tab:freeze}
+\centering\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llrrrccc@{}}
+\toprule
+Party models & Training & Trainable & Upload & Time & F1 (\%) & Bal.\ acc.\ (\%) & Acc.\ (\%)\\
+\midrule
+\inputtab{gen/tab_freeze.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{When does a second party help?}\label{sec:exp-complement}
+
+\begin{table}[t]
+\caption{MILK10k: macro F1 (\%) of one-shot heads on frozen features for every combination of parties (5 folds, class-balanced MLP head). Bottom: the usual practice of splitting one image into a left and a right party.}\label{tab:milk}
+\centering\scriptsize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Parties & DINOv2-g & CLIP-L & BiomedCLIP & MONET\\
+\midrule
+\inputtab{gen/tab_milk.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{MILK10k: real modalities complement each other little.}
+The dermoscopic image alone gives \milkGDerm\,\% macro F1 with DINOv2-g, the clinical photograph \milkGClin\,\%, the metadata \milkMeta\,\% (Table~\ref{tab:milk}). Concatenating the two images adds only \emph{half a point} over the dermoscopy (\milkGBoth\,\%), three points with CLIP-L (\milkCDerm{} $\to$ \milkCBoth\,\%); the metadata add nothing on top. The general-purpose encoders match or beat the medical ones (BiomedCLIP, MONET). Splitting the dermoscopy into two halves, as split benchmarks do, \emph{loses} information instead: \milkGHalves\,\% against \milkGDerm\,\% for the whole image, because each party's encoder sees half a lesion.
+
+\begin{table}[t]
+\caption{MILK10k: how the label owner combines the clinical (A) and dermoscopic (B) uploads (macro F1, \%, 5 folds). Late fusion: one head per party, log-probabilities averaged with a weight chosen on the validation fold. Branches: per-party projection, auxiliary per-party losses and modality dropout (0.3). Last column: share of test lesions misclassified by both single-party heads, and (in brackets) what it would be if their errors were independent.}\label{tab:milkfusion}
+\centering\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+Encoder & B alone & A+B concat & A+B late fusion & A+B branches & A+B+C branches & Both wrong (\%)\\
+\midrule
+\inputtab{gen/tab_milkfusion.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{How the parties are combined matters as much as the encoder.}
+A concatenation MLP under-uses the weaker party. Training one head per party and averaging their log-probabilities (late fusion) is better for every encoder (Table~\ref{tab:milkfusion}): \mfGLate\,\% instead of \mfGCat\,\% with DINOv2-g, \mfCLate\,\% instead of \mfCCat\,\% with CLIP-L, \mfGMLate\,\% when each party uploads DINOv2-g and MONET features; the clinical photograph then adds about three points to the dermoscopy. Late fusion also suits VFL: each party's head can be trained, audited and dropped independently. The gain is bounded by the data: \mfGBoth\,\% of the lesions are misclassified by both single-party heads, against \mfGIndep\,\% if their errors were independent---the two modalities fail on the same, intrinsically hard lesions.
+
+\paragraph{WorldStrat: two sensors, three labels.}
+PENDING (Fig.~\ref{fig:ws}, Table~\ref{tab:wsfusion}).
 
 \begin{figure}[t]
-\centering\includegraphics[width=0.78\linewidth]{gen/fig_pareto.pdf}
-\caption{Accuracy versus one-time upload (bytes per sample, 16 parties) for per-party PCA (number of components $d'$ annotated on the 16-bit curve) and uniform scalar quantisation of frozen DINOv2-g features (168\,px), MLP head, mean\,$\pm$\,sample std over 5 seeds. Circles: configuration with the best \emph{validation} accuracy under a budget of 256\,B, 512\,B, 2\,KiB and 48\,KiB.}\label{fig:pareto}
-\end{figure}
-
-~TEXT-PARETO~
-
-\subsection{Fewer parties, missing parties}\label{sec:exp-parties}
-
-\begin{figure}[t]
-\centering\includegraphics[width=\linewidth]{gen/fig_parties.pdf}
-\caption{Left: accuracy with $k$ randomly chosen parties (3 subsets $\times$ 5 seeds). Right: parties missing at inference, replaced by zeros or by the training mean of the party, for heads trained with and without party-level dropout (5 seeds; DINOv2-g, 168\,px).}\label{fig:parties}
-\end{figure}
-
-~TEXT-PARTIES~
-
-\subsection{What does the upload leak?}\label{sec:exp-privacy}
-
-\begin{figure}[t]
-\centering\includegraphics[width=\linewidth]{gen/fig_inversion.pdf}
-\caption{Inversion attack on held-out test images ($64\times64$ RGB thumbnails of four test locations, party 0; brightness $\times3$ for display, identical for all panels). From left to right: original; its mean colour; nearest training image in DINOv2-g feature space; decoder output from one full DINOv2-g upload, from the 16 uploads of the location, from a PCA-64 upload, from a clipped noisy upload ($\varepsilon=8$), and from one CLIP-L upload.}\label{fig:inversion}
+\centering\IfFileExists{gen/fig_ws.pdf}{\includegraphics[width=\linewidth]{gen/fig_ws.pdf}}{(pending)}
+\caption{WorldStrat: macro F1 of the SPOT party alone and with the Sentinel-2 party, as the SPOT image is degraded from 1.5 to 10\,m (5 folds, DINOv2-g, MLP head). Dotted: Sentinel-2 alone.}\label{fig:ws}
 \end{figure}
 
 \begin{table}[t]
-\caption{Utility versus leakage of the upload format (16 parties, 168-px DINOv2-g unless stated). Upload: bytes per sample; accuracy on the VertiBench test set (5 seeds); PSNR (3 decoder seeds for the full, PCA-64 and $\varepsilon=8$ rows) and SSIM of the single-upload attack; Re-id: share of test images whose reconstruction is closer to them than to any other of the 12.5k test images (chance: 0.01\,\%); Joint: PSNR of the attack that sees the 16 uploads of a location. Clip + noise: the Gaussian mechanism of Sec.~\ref{sec:method}, per-upload $(\varepsilon, 10^{-5})$.}\label{tab:privacy}
+\caption{WorldStrat: making the Sentinel-2 party help (macro F1, \%, 5 folds, DINOv2-g). S2 vectors: number of 4{,}608-d vectors the Sentinel-2 party uploads per area (RGB, NIR and SWIR composites); all variants remain one-shot.}\label{tab:wsfusion}
+\centering\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Sentinel-2 summary / head & S2 vectors & IPCC & LCCS & SMOD\\
+\midrule
+\inputtab{gen/tab_wsfusion.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Compression and missing parties}\label{sec:exp-compress}
+
+\begin{figure}[t]
+\centering\includegraphics[width=0.78\linewidth]{gen/fig_pareto.pdf}
+\caption{VertiBench: accuracy versus one-time upload (bytes per sample, 16 parties) for per-party PCA (number of components annotated on the 16-bit curve) and uniform scalar quantisation of frozen DINOv2-g features, MLP head, 5 seeds. Circles: configuration with the best \emph{validation} accuracy under a budget of 256\,B, 512\,B, 2\,KiB and 48\,KiB.}\label{fig:pareto}
+\end{figure}
+
+\paragraph{A few hundred bytes suffice.}
+Because the encoder is frozen, each party can fit a PCA on its own features and quantise them, without any coordination. Selecting the configuration on the validation set under a byte budget (Fig.~\ref{fig:pareto}), 256\,B per sample for the 16 parties (\selTwoCfg) give \selTwoAcc\,\%, 2\,KiB (\selTwokCfg) \selTwokAcc\,\%, and 8\,KiB (\selFullCfg) \selFullAcc\,\%, against \fullAcc\,\% for the uncompressed 48\,KiB: compression costs nothing and acts as a regulariser for the small labelled set. Even one bit per feature keeps \cmpOneBit\,\%.
+
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{gen/fig_parties.pdf}
+\caption{VertiBench. Left: accuracy with $k$ randomly chosen parties (3 subsets $\times$ 5 seeds). Right: parties missing at inference for a concatenation head (missing uploads replaced by zeros or by the party's training mean, with and without party dropout during training) and for a head that averages per-party embeddings.}\label{fig:parties}
+\end{figure}
+
+\paragraph{Missing parties.}
+The 16 VertiBench parties observe the same sensor at different dates and are largely redundant: one party alone gives \soloMean\,\% on average (\soloMin--\soloMax), all 16 give \partiesKAll\,\% (Fig.~\ref{fig:parties}). A concatenation head breaks when parties are missing at inference and their uploads are replaced by zeros (\missZeroTwelveZ\,\% with 12 of 16 missing); imputing the party's training mean (\missZeroTwelveM\,\%) or training with party dropout (\missHTwelveZ\,\%) repairs most of it. A head that averages per-party embeddings needs neither: it reaches \poolGMean\,\% with all parties, \poolMissTwelve\,\% with 12 missing and still \poolMissFifteen\,\% with a single party left.
+
+\subsection{What the upload leaks, and how to protect it}\label{sec:exp-privacy}
+
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{gen/fig_inversion.pdf}
+\caption{Inversion attack on held-out VertiBench test images ($64\times64$ RGB thumbnails, brightness $\times3$ for display). From left to right: original; its mean colour; nearest training image in DINOv2-g feature space; decoder output from one full DINOv2-g upload, from the 16 uploads of the location, from a PCA-64 upload, from a clipped noisy upload, and from one CLIP-L upload.}\label{fig:inversion}
+\end{figure}
+
+\begin{table}[t]
+\caption{Utility versus leakage of the upload format on VertiBench (DINOv2-g, 224\,px). Accuracy on the test set (5 seeds); PSNR and SSIM of the single-upload inversion; Re-id: share of the 12{,}560 test images whose reconstruction is closer to them than to any other (chance: 0.01\,\%); Joint: PSNR of the attack that sees the 16 uploads of a location. Clip + noise: the Gaussian mechanism of Sec.~\ref{sec:method}, per-upload $(\varepsilon, 10^{-5})$.}\label{tab:privacy}
 \centering\scriptsize
 \setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{@{}lrccccc@{}}
@@ -90,23 +180,23 @@ Upload format & Upload & Acc. (\%) & PSNR (dB) & SSIM & Re-id (\%) & Joint (dB)\
 \end{tabular}
 \end{table}
 
-~TEXT-PRIVACY~
+\paragraph{Inversion recovers colour, not layout.}
+A decoder trained on public image--feature pairs reconstructs a test image from one uploaded vector with \invFull\,dB PSNR (Table~\ref{tab:privacy}, Fig.~\ref{fig:inversion}): better than the mean training image (\invMean\,dB) or the nearest training image in feature space (\invNN\,dB), but \emph{worse} than simply painting each image with its own mean colour (\invColour\,dB). Reconstructions identify their source among the 12{,}560 test images in \invFullReid\,\% of the cases (chance: 0.01\,\%; mean colour: \invColourReid\,\%). Compression lowers the leakage slightly (PCA-16: \invPCAst\,dB, \invPCAstReid\,\%) at little cost in accuracy. A formal guarantee is expensive: clipping and Gaussian noise for $\varepsilon=64$ per upload already drops accuracy to \dpFullSsf\,\%, and to \dpFullEight\,\% at $\varepsilon=8$.
 
-\subsection{WorldStrat: two sensors, and what a random split hides}\label{sec:exp-ws}
+\paragraph{Encrypted training of a linear head.}
+PENDING (Table~\ref{tab:he}): linear heads cost little accuracy on frozen features (Table~\ref{tab:encoders}, last column); ridge and polynomial-logistic heads after PCA; CKKS timing.
 
 \begin{table}[t]
-\caption{WorldStrat, IPCC land cover (7 classes, 3{,}925 locations). Frozen DINOv2 ViT-g/14 features, MLP head. Five-fold cross-validation with random or spatial folds (each fold is the test set once). Accuracy and macro AUC in \%, mean\,$\pm$\,sample std over folds.}\label{tab:ws}
+\caption{Heads that can be trained on encrypted uploads. Primary metric (accuracy on VertiBench and CIFAR, macro F1 otherwise), 5 seeds or folds. Ridge: closed form from $X^\top X$ and $X^\top Y$; poly-logistic: degree-3 polynomial sigmoid, fixed full-batch Nesterov steps; both after a per-party PCA to 64 or 16 components.}\label{tab:he}
 \centering\scriptsize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}lcccc@{}}
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}llccccccc@{}}
 \toprule
- & \multicolumn{2}{c}{Random 5-fold CV} & \multicolumn{2}{c}{Spatial 5-fold CV}\\
-\cmidrule(lr){2-3}\cmidrule(lr){4-5}
-Inputs & Acc. & AUC & Acc. & AUC\\
+& & \multicolumn{3}{c}{Full features} & \multicolumn{3}{c}{PCA-64} & PCA-16\\
+\cmidrule(lr){3-5}\cmidrule(lr){6-8}\cmidrule(lr){9-9}
+Task & Metric & MLP & Softmax & Ridge & MLP & Ridge & Poly-log. & Ridge\\
 \midrule
-\inputtab{gen/tab_ws_ipcc.tex}
+\inputtab{gen/tab_he.tex}
 \bottomrule
 \end{tabular}
 \end{table}
-
-~TEXT-WS~

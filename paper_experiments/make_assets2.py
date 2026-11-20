@@ -52,8 +52,12 @@ def write(name, text):
     print("wrote", name)
 
 
+DIG = dict(zip("0123456789", ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]))
+
+
 def macro(name, value):
-    MACROS[name] = value
+    """LaTeX macro names cannot contain digits or punctuation: spell digits out, drop the rest."""
+    MACROS["".join(DIG.get(c, c) for c in name if c.isalnum())] = value
 
 
 def f1(x, d=1):
@@ -130,6 +134,12 @@ if maj:
     rows.append(f"Majority class & -- & -- & -- & -- & {maj:.1f} & -- & -- \\\\")
     macro("majVB", f1(maj))
 write("tab_main.tex", "\n".join(rows))
+e5 = (Eg.get("E5_paired") or {}).get("clip_l14_224_vs_dinov2_g_224")
+if e5:
+    macro("pairDiff", f1(e5["diff"]))
+    macro("pairLo", f1(e5["ci95"][0]))
+    macro("pairHi", f1(e5["ci95"][1]))
+    macro("pairP", f"{e5['mcnemar_p']:.2f}")
 for k, m in (("dinov2_g_224", "G"), ("clip_l14_224", "Clip"), ("clip_b16_224", "ClipB"), ("dinov2_b_224", "DinoB"), ("dinov2_s_224", "DinoS")):
     h = heads224.get(k)
     if h:
@@ -163,10 +173,13 @@ rows = []
 for k, v in combo.items():
     names = k.split("+")
     gf = sum(cost.get(n, {}).get("flops_per_image", 0) for n in names) / 1e9
-    rows.append(f"{' + '.join(CN.get(n, n) for n in names)} (standardised) & {gf:.0f} & {v['dim']} & {pm(v['mlp2'])} & {pm(v['mlp2'], 'f1')} & {pm(v['linear'])} \\\\")
+    if len(names) < 2:
+        continue
+    pp = sum(cost.get(n, {}).get("params", 0) for n in names) / 1e6
+    rows.append(f"{' + '.join(CN.get(n, n) for n in names)} & {pp:.0f} & {gf:.0f} & {v['dim']} & {pm(v['mlp2'])} & {pm(v['mlp2'], 'f1')} & {pm(v['linear'])} \\\\")
     macro("combo" + "".join({"dinov2_g_224": "G", "clip_l14_224": "L", "clip_b16_224": "B", "dinov2_b_224": "D"}[n] for n in names), f1(v["mlp2"]["acc"]))
 if rows:
-    write("tab_combo.tex", "\n".join(rows))
+    write("tab_combo_enc.tex", "\n".join(rows))
 
 # ------------------------------------------------------------------ classic benchmarks vs published numbers
 PUB = {  # (dataset, protocol): list of (method, number)
@@ -206,7 +219,7 @@ for n, (one, few) in SUN.items():
 write("tab_sun.tex", "\n".join(rows))
 for ds in ("cifar10", "cifar100"):
     for e in ("dinov2_g", "clip_l14"):
-        for proto, t in (("K=2 top/bottom", "Two"), ("K=4 quadrants", "Four"), ("centralised (full image)", "Cent")):
+        for proto, t in (("K=2 top/bottom", "Two"), ("K=4 quadrants", "Four"), ("centralised (full image)", "Cent"), ("solo quadrant", "SoloQ"), ("solo bottom half", "SoloH")):
             s = cls.get(ds, {}).get(e, {}).get(f"{proto}|mlp2")
             if s:
                 macro(f"{ {'cifar10': 'cTen', 'cifar100': 'cHun'}[ds] }{ {'dinov2_g': 'G', 'clip_l14': 'C'}[e] }{t}".replace(" ", ""), f1(s["acc"]))
@@ -297,7 +310,8 @@ if msplit or milk:
             if rows and rows[-1] != "\\midrule" and k == "dinov2_b":
                 rows.append("\\midrule")
             d = {"dinov2_b": 768, "clip_b16": 768, "dinov2_g": 1536, "clip_l14": 1024}[k]
-            rows.append(f"{lab} & one-shot & 2.0\\,M & {size(2 * d * 2)} & -- & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
+            hp = (2 * d * 1000 + 1000 + 2 * 1000 + 1000 * 7 + 7) / 1e6  # MLP head: Linear(2d,1000)-BN-ReLU-Linear(1000,7)
+            rows.append(f"{lab} & one-shot & {hp:.1f}\\,M & {size(2 * d * 2)} & -- & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
             macro(f"fz{k.replace('_', '').replace('16', 'Sixteen').replace('14', 'Fourteen')}", f1(s["f1"]))
     write("tab_freeze.tex", "\n".join(rows))
 
@@ -620,6 +634,12 @@ for key, tag in (("milk10k/dinov2_g/pca64", "Milk"), ("vertibench/dinov2_g_224/p
         macro(f"hc{tag}Plain", size(c["plain_fp16_bytes_per_party"]))
         macro(f"hc{tag}Err", f"{c['max_rel_error']:.0e}")
         macro(f"hc{tag}CtCt", f"{c['secs_ctct_inner_product'] * 1000:.0f}")
+
+# ------------------------------------------------------------------ placeholders, so that the paper compiles on partial results
+for t in ("tab_main", "tab_encoders", "tab_combo_enc", "tab_classic", "tab_sun", "tab_milk", "tab_milkfusion", "tab_freeze", "tab_ws", "tab_wsfusion",
+          "tab_pareto", "tab_privacy", "tab_he"):
+    if not os.path.exists(os.path.join(OUT, t + ".tex")):
+        write(t + ".tex", "\\multicolumn{2}{@{}l}{(pending)}\\\\")
 
 # ------------------------------------------------------------------ macros
 with open(os.path.join(OUT, "macros.tex"), "w") as f:
