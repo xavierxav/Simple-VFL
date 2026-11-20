@@ -104,6 +104,22 @@ def spatial_folds(meta, n_clusters=25, n_folds=5):
     return out, cl
 
 
+def random_cv_folds(y, n_folds=5):
+    """Stratified random 5-fold CV with the same fold roles as the spatial protocol: the TEST set changes with the fold."""
+    from sklearn.model_selection import StratifiedKFold
+
+    fold = np.zeros(len(y), int)
+    for f, (_, te) in enumerate(StratifiedKFold(n_folds, shuffle=True, random_state=0).split(np.zeros(len(y)), y)):
+        fold[te] = f
+    out = []
+    for f in range(n_folds):
+        te = np.where(fold == f)[0]
+        va = np.where(fold == (f + 1) % n_folds)[0]
+        tr = np.where((fold != f) & (fold != (f + 1) % n_folds))[0]
+        out.append((tr, va, te))
+    return out
+
+
 # ---------------------------------------------------------------- settings
 def pick_view(X, g):  # X [N,V,d] -> random revisit [N,d]
     return X[torch.arange(len(X), device=DEV), torch.randint(0, X.shape[1], (len(X),), generator=g).to(DEV)]
@@ -158,6 +174,7 @@ def location_rf(meta, y, tr, te, ncls, seed):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--labels", default="ipcc,simplified_ipcc,sources")
+    ap.add_argument("--regimes", default="", help="comma-separated subset of random,random_cv,spatial (default: all)")
     a = ap.parse_args()
     meta, spot, sent = load_all()
     spot, sent = spot.to(DEV), sent.to(DEV)
@@ -170,16 +187,19 @@ def main():
     for label in a.labels.split(","):
         y, ncls = labels_of(meta, label)
         y_t = torch.as_tensor(y, device=DEV)
-        results[label] = {"class_counts": np.bincount(y, minlength=ncls).tolist()}
+        results.setdefault(label, {})["class_counts"] = np.bincount(y, minlength=ncls).tolist()  # keep regimes of earlier runs
         regimes = {
-            "random": [(random_split(y, s), s) for s in range(5)],
+            "random": [(random_split(y, s), s) for s in range(5)],  # fixed test set (random_state=42), seed = train/val only
+            "random_cv": [(f, i) for i, f in enumerate(random_cv_folds(y))],  # test set changes with the fold
             "spatial": [(f, i) for i, f in enumerate(folds)],
         }
+        if a.regimes:
+            regimes = {k: v for k, v in regimes.items() if k in a.regimes.split(",")}
         for reg, items in regimes.items():
             res = {"location_rf": [location_rf(meta, y, tr, te, ncls, s) for (tr, va, te), s in items]}
             res["location_rf"] = summarize(res["location_rf"])
             print(f"[{label}/{reg}] location_rf", fmt(res["location_rf"]), flush=True)
-            if reg == "spatial":
+            if reg in ("spatial", "random_cv"):
                 res["test_class_counts"] = [np.bincount(y[te], minlength=ncls).tolist() for (_, _, te), _ in items]
             for name, (X, arch, hidden, tf, ev) in S.items():
                 t = time.time()

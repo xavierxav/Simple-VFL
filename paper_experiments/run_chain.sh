@@ -3,6 +3,8 @@
 #   A: WorldStrat provider label, frozen features (s1), heads (s2), inversion (s4), timing (s6)
 #   B: full-resolution end-to-end baselines (s3)
 #   C: RGB baselines and encoder timing only (re-run on a second GPU)
+#   D: why CLIP > DINOv2 (s7: encoder ablations, VertiBench <-> WorldStrat matching, geography), WorldStrat random
+#      5-fold CV (s5), and the reproduction of the published VertiBench SplitNN (s8)
 # Progress: /content/logs/chain.log (one log per step).  Ends with CHAIN_DONE (keepalive.sh then harvests and stops the VM).
 cd "$(dirname "$0")"
 L=/content/logs; mkdir -p $L /content/results /content/vb_raw
@@ -32,6 +34,12 @@ if [ "$1" = A ]; then
   step s2 s2_vertibench_heads.py
   step s4 s4_inversion.py
   step s6 s6_timing.py
+elif [ "$1" = D ]; then
+  cp -n ../paper_results/ws_results.json /content/results/ 2>/dev/null
+  step s3pack s3_baselines.py pack
+  step s7 s7_vertibench_geo.py
+  step s5cv s5_worldstrat.py --regimes random_cv
+  step s8 s8_vertibench_repro.py
 elif [ "$1" = C ]; then
   step s3pack s3_baselines.py pack
   step s3_splitnn_rgb s3_baselines.py splitnn --bands rgb
