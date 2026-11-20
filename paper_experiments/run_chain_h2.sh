@@ -10,6 +10,7 @@ step() {
   local rc=$?
   echo "$(date +%H:%M:%S) end $n (exit $rc)"
 }
+pip uninstall -y -q torchao > /dev/null 2>&1  # peft refuses the old torchao of the image; LoRA does not need it
 step milk_split2 s11_milk10k.py split --kinds dinov2_b_lora,clip_b16_lora,dinov2_b_ft
 until grep -qx CHAIN_DONE $L/chain.log 2>/dev/null; do sleep 60; done  # s13 of chain H
 echo CHAIN2_DONE
