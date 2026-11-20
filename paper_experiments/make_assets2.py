@@ -345,7 +345,9 @@ if msplit or milk:
             s = msplit.get(k)
             if not s:
                 continue
-            rows.append(f"{lab} & split & {s['trainable_params'] / 1e6:.1f}\\,M & {size(s['bytes_per_train_sample'])} & {np.mean(s['secs_per_fold']) / 60:.1f} & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
+            rows.append(f"{lab} & split, {s['epochs']} ep. & {s['trainable_params'] / 1e6:.1f}\\,M & {size(s['bytes_per_train_sample'])} & {np.mean(s['secs_per_fold']) / 60:.1f} & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
+            macro(f"fzMin{k}", f"{np.mean(s['secs_per_fold']) / 60:.1f}")
+            macro(f"fzUp{k}", size(s["bytes_per_train_sample"]))
             macro(f"fz{k.replace('_', '').replace('18', 'Eighteen').replace('16', 'Sixteen')}", f1(s["f1"]))
         else:
             s = (milk or {}).get(k, {}).get("clin+derm|mlp2|bal")
@@ -357,6 +359,10 @@ if msplit or milk:
             hp = (2 * d * 1000 + 1000 + 2 * 1000 + 1000 * 7 + 7) / 1e6  # MLP head: Linear(2d,1000)-BN-ReLU-Linear(1000,7)
             rows.append(f"{lab} & one-shot & {hp:.1f}\\,M & {size(2 * d * 2)} & -- & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
             macro(f"fz{k.replace('_', '').replace('16', 'Sixteen').replace('14', 'Fourteen')}", f1(s["f1"]))
+    mrg = (load("milk_reg.json") or {}).get("dinov2_g", {}).get("late fusion (fixed 0.5)|views mean")
+    if mrg:
+        hp2 = 2 * (1536 * 1000 + 1000 + 2 * 1000 + 1000 * 7 + 7) / 1e6
+        rows.append(f"DINOv2-g, frozen, late fusion, 8 views & one-shot & {hp2:.1f}\\,M & {size(2 * 1536 * 2)} & -- & {pm(mrg, 'f1')} & {pm(mrg, 'bacc')} & {pm(mrg)} \\\\")
     write("tab_freeze.tex", "\n".join(rows))
 
 # ------------------------------------------------------------------ WorldStrat: sensors, labels, resolution

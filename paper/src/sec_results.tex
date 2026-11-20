@@ -72,7 +72,8 @@ On the splits used by VFLAIR, FedOnce and Sun et al., frozen DINOv2-g features b
 
 \subsection{The price of freezing}\label{sec:exp-freeze}
 
-PENDING: MILK10k split learning with the same backbones (Table~\ref{tab:freeze}).
+\paragraph{Freezing costs 4 to 7 points on dermatology.}
+Skin-lesion photographs are far from web-scale pre-training data, and there, training the party encoders pays off (Table~\ref{tab:freeze}). Split learning that adapts DINOv2-B with LoRA reaches \fzdinovTwoblora\,\% macro F1, against \fzdinovTwob\,\% for the same encoder frozen; for CLIP-B, \fzclipbSixteenlora{} against \fzclipbSixteen\,\%. Pre-training still matters more than the training scheme: split learning from scratch reaches only \fzresnetEighteen\,\% and from ImageNet weights \fzresnetEighteenin\,\%, below every frozen foundation encoder. Part of the gap closes without giving up the single upload: frozen DINOv2-g with late fusion and the 8 precomputed views of Sec.~\ref{sec:exp-complement} reaches \mrGLateViews\,\%, three points below LoRA. The remaining points have a price that the table only partly shows: every party needs a GPU and must stay online and synchronised for each training run, exchanging \fzUpdinovTwoblora{} per training sample over 10 epochs instead of 3--6\,KiB once, and every re-training restarts the exchange.
 
 \begin{table}[t]
 \caption{The price of freezing on MILK10k (clinical + dermoscopic parties, 7 classes, 5-fold cross-validation, class-balanced loss). Split learning trains the party models (bottoms) with the label owner's gradients; one-shot rows use frozen features and an MLP head. Upload: per training sample and epoch for split learning, once for one-shot. Time: minutes per fold on one A100.}\label{tab:freeze}
