@@ -23,7 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy.stats import binomtest
 
-from pe_common import DEV, evaluate, fmt, predict_proba, save_json, seed_all, split_val, summarize, train_head
+from pe_common import DEV, evaluate, evaluate_all, fmt, predict_proba, save_json, seed_all, split_val, summarize, train_head
 
 CACHE = os.environ.get("PE_CACHE", "/content/cache/vb")
 SEEDS = [0, 1, 2, 3, 4]
@@ -50,8 +50,7 @@ def run(Xtr_all, Xte, seeds=SEEDS, prep=None, test_tf=None, keep_probs=False, **
             A, V, T = prep(A, V, T, s)
         m = train_head(A, ytr[tr], V, ytr[va], NCLS, seed=s, **kw)
         Tt = T if test_tf is None else test_tf(T, A)
-        acc, auc = evaluate(m, Tt, yte)
-        runs.append({"acc": acc, "auc": auc})
+        runs.append(evaluate_all(m, Tt, yte))
         vals.append(evaluate(m, V, ytr[va])[0] * 100)
         if keep_probs:
             probs.append(predict_proba(m, Tt).cpu().numpy())
@@ -172,9 +171,10 @@ def e4(G):
     import s2_vertibench_heads as s2
 
     Xtr, Xte = G
+    D = Xtr.shape[-1]
     res = []
-    for d in (1536, 64, 16):
-        comp = s2.make_compressor(d, 32) if d < 1536 else None
+    for d in (D, 64, 16):
+        comp = s2.make_compressor(d, 32) if d < D else None
         for eps in (None, 64, 8, 1):
 
             def prep(A, V, T, seed, comp=comp, eps=eps):
@@ -225,8 +225,9 @@ def e7(G):
     import s2_vertibench_heads as s2
 
     Xtr, Xte = G
+    D = Xtr.shape[-1]
     res = []
-    for d in (1536, 512, 256, 128, 64, 32, 16):
+    for d in (D, 512, 256, 128, 64, 32, 16):
         for bits in (16, 8, 4, 2, 1):
             r = run(Xtr, Xte, prep=s2.make_compressor(d, bits))  # bits=16: half-precision cast
             r.update({"d": d, "bits": bits, "bytes_per_sample": 16 * d * bits / 8})
@@ -269,13 +270,16 @@ def e6():
 
 
 def main():
-    from s7_vertibench_geo import extract_all
+    main_name = os.environ.get("PE_MAIN", "dinov2_g_168")
+    paired = os.environ.get("PE_PAIRED", "clip_l14_224,dinov2_g_168,dinov2_g_224").split(",")
+    if not all(os.path.exists(f"{CACHE}/f7_{n}_test.npy") for n in [main_name] + paired):
+        from s7_vertibench_geo import extract_all
 
-    extract_all()  # stage-7 encoders (cached when stage 7 already ran on this VM)
-    G = feats("dinov2_g_168")
+        extract_all()  # stage-7 encoders (cached when stage 7 already ran on this VM)
+    G = feats(main_name)
     out = {}
     for name, fn in (("E1_regularisation", lambda: e1(G)), ("E3_parties", lambda: e3(G)), ("E2_missing", lambda: e2(G)),
-                     ("E4_dp", lambda: e4(G)), ("E5_paired", lambda: e5(["clip_l14_224", "dinov2_g_168", "dinov2_g_224"])),
+                     ("E4_dp", lambda: e4(G)), ("E5_paired", lambda: e5(paired)),
                      ("E7_pareto_val", lambda: e7(G)), ("E6_ssl4eo", e6)):
         if os.environ.get("PE_SKIP", "") and name.split("_")[0] in os.environ["PE_SKIP"].split(","):
             continue
@@ -286,7 +290,7 @@ def main():
 
             traceback.print_exc()
             out[name] = {"error": repr(e)}
-        save_json("vb_controls.json", out)
+        save_json(os.environ.get("PE_CONTROLS_OUT", "vb_controls.json"), out)
     print("DONE", flush=True)
 
 

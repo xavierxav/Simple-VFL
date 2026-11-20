@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 
 import pe_common
-from pe_common import DEV, evaluate, fmt, save_json, split_val, summarize, train_head
+from pe_common import DEV, evaluate_all, fmt, save_json, split_val, summarize, train_head
 
 CACHE = os.environ.get("PE_CACHE", "/content/cache/vb")
 ytr = torch.from_numpy(np.load(f"{CACHE}/labels_train.npy")).to(DEV)
@@ -58,8 +58,7 @@ def run(Xtr, Xte, arch, test_mask=None, seeds=range(5)):
         tr, va = torch.from_numpy(tr).to(DEV), torch.from_numpy(va).to(DEV)
         m = train_head(Xtr[tr], ytr[tr], Xtr[va], ytr[va], NCLS, arch=arch, seed=s)
         T = Xte if test_mask is None else Xte * test_mask
-        acc, auc = evaluate(m, T, yte)
-        runs.append({"acc": acc, "auc": auc})
+        runs.append(evaluate_all(m, T, yte))
     return summarize(runs)
 
 
@@ -75,7 +74,10 @@ def main():
 
     pe_common.make_head = make_head
     res = {"official": {}, "missing": []}
-    for name in ("dinov2_g_168", "dinov2_g_224", "clip_l14_224", "dinov2_s_168"):
+    names = os.environ.get("PE_POOL_NAMES", "dinov2_g_168,dinov2_g_224,clip_l14_224,dinov2_s_168").split(",")
+    main_name = os.environ.get("PE_MAIN", "dinov2_g_168")
+    out_name = os.environ.get("PE_POOL_OUT", "vb_pooling.json")
+    for name in names:
         if not os.path.exists(f"{CACHE}/f7_{name}_test.npy"):
             continue
         Xtr, Xte = feats(name)
@@ -83,9 +85,9 @@ def main():
             r = run(Xtr, Xte, arch)
             res["official"][f"{name}/{arch}"] = r
             print(f"{name:14s} {arch:9s} {fmt(r)}", flush=True)
-        save_json("vb_pooling.json", res)
+        save_json(out_name, res)
     # PCA-64 then pooling
-    Xtr, Xte = feats("dinov2_g_168")
+    Xtr, Xte = feats(main_name)
     comp = s2.make_compressor(64, 32)
     for arch in ("mlp2", "mean"):
         runs = []
@@ -94,10 +96,9 @@ def main():
             tr, va = torch.from_numpy(tr).to(DEV), torch.from_numpy(va).to(DEV)
             A, V, T = comp(Xtr[tr], Xtr[va], Xte, s)
             m = train_head(A, ytr[tr], V, ytr[va], NCLS, arch=arch, seed=s)
-            acc, auc = evaluate(m, T, yte)
-            runs.append({"acc": acc, "auc": auc})
-        res["official"][f"dinov2_g_168_pca64/{arch}"] = summarize(runs)
-        print("pca64", arch, fmt(res["official"][f"dinov2_g_168_pca64/{arch}"]), flush=True)
+            runs.append(evaluate_all(m, T, yte))
+        res["official"][f"{main_name}_pca64/{arch}"] = summarize(runs)
+        print("pca64", arch, fmt(res["official"][f"{main_name}_pca64/{arch}"]), flush=True)
     # missing parties at inference (no imputation needed for the pooling heads)
     gen = torch.Generator(device="cpu").manual_seed(7)
     for m in (0, 4, 8, 12, 15):
@@ -110,7 +111,7 @@ def main():
             r.update({"arch": arch, "missing_at_test": m})
             res["missing"].append(r)
             print(f"missing {m:2d} {arch:9s} {fmt(r)}", flush=True)
-        save_json("vb_pooling.json", res)
+        save_json(out_name, res)
     print("DONE", flush=True)
 
 

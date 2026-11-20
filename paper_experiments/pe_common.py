@@ -75,6 +75,24 @@ def evaluate(model, X, y, transform=None):
     return acc, auc
 
 
+def metrics_from_proba(y, proba):
+    """acc, macro AUC, macro F1, balanced accuracy (fractions) from numpy labels and class probabilities."""
+    from sklearn.metrics import balanced_accuracy_score, f1_score
+
+    y = np.asarray(y)
+    proba = np.asarray(proba)
+    pred = proba.argmax(1)
+    return {"acc": float((pred == y).mean()), "auc": auc_macro_ovr(y, proba),
+            "f1": float(f1_score(y, pred, average="macro", labels=np.arange(proba.shape[1]), zero_division=0)),
+            "bacc": float(balanced_accuracy_score(y, pred))}
+
+
+def evaluate_all(model, X, y, transform=None):
+    """Like evaluate() but returns a dict with acc, auc, f1 (macro) and bacc (balanced accuracy)."""
+    p = predict_proba(model, X, transform=transform)
+    return metrics_from_proba(y.cpu().numpy(), p.cpu().numpy())
+
+
 def train_head(
     Xtr,
     ytr,
@@ -144,12 +162,13 @@ def mean_std(vals):
 
 
 def summarize(runs):
-    """runs: list of dict(acc, auc) -> dict with mean/std in percent + raw lists."""
-    acc = [r["acc"] * 100 for r in runs]
-    auc = [r["auc"] * 100 for r in runs]
-    a, sa = mean_std(acc)
-    u, su = mean_std(auc)
-    return {"acc": a, "acc_std": sa, "auc": u, "auc_std": su, "accs": acc, "aucs": auc, "n": len(runs)}
+    """runs: list of dict(acc, auc[, f1, bacc]) -> dict with mean/std (sample std) in percent + raw lists."""
+    out = {"n": len(runs)}
+    for k in ("acc", "auc", "f1", "bacc"):
+        if all(k in r for r in runs):
+            v = [r[k] * 100 for r in runs]
+            out[k], out[k + "_std"], out[k + "s"] = float(np.mean(v)), float(np.std(v, ddof=1)) if len(v) > 1 else 0.0, v
+    return out
 
 
 def save_json(name, obj):
@@ -160,7 +179,8 @@ def save_json(name, obj):
 
 
 def fmt(s):
-    return f"{s['acc']:.2f}±{s['acc_std']:.2f} / {s['auc']:.2f}±{s['auc_std']:.2f}"
+    t = f"{s['acc']:.2f}±{s['acc_std']:.2f} / {s['auc']:.2f}±{s['auc_std']:.2f}"
+    return t + (f" / F1 {s['f1']:.2f}±{s['f1_std']:.2f}" if "f1" in s else "")
 
 
 def split_val(n, seed, frac=0.15, y=None):

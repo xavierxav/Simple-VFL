@@ -34,7 +34,8 @@ import s2_vertibench_heads as s2  # noqa: E402  (re-use the exact compressor of 
 
 
 def load_feature(split, backbone="dinov2_g"):
-    cands = {"dinov2_g": ("feat_dinov2_g", "f7_dinov2_g_168"), "clip_l14": ("feat_clip_l14", "f7_clip_l14_224")}[backbone]
+    main = os.environ.get("PE_INV_FEAT", "f7_dinov2_g_168")
+    cands = {"dinov2_g": (main,) if main != "f7_dinov2_g_168" else ("feat_dinov2_g", main), "clip_l14": ("feat_clip_l14", "f7_clip_l14_224")}[backbone]
     for f in (f"{CACHE}/{c}_{split}.npy" for c in cands):
         if os.path.exists(f):
             return torch.from_numpy(np.load(f)).to(DEV).float()
@@ -278,8 +279,8 @@ def main():
             res[mode][name] = r
             examples[f"{mode}:{name}"] = ex
             print(f"{mode:6s} {name:16s} PSNR {r['psnr']:.2f} dB  SSIM {r['ssim']:.3f}  ({r['secs']}s)", flush=True)
-            save_json("vb_inversion.json", res)
-            np.savez_compressed(os.path.join(OUT, "vb_inversion_examples.npz"), **{k.replace(" ", "_").replace(",", "").replace(":", "__").replace("=", ""): v for k, v in examples.items()})
+            save_json(os.environ.get("PE_INV_OUT", "vb_inversion") + ".json", res)
+            np.savez_compressed(os.path.join(OUT, os.environ.get("PE_INV_OUT", "vb_inversion") + "_examples.npz"), **{k.replace(" ", "_").replace(",", "").replace(":", "__").replace("=", ""): v for k, v in examples.items()})
 
 
 if __name__ == "__main__":

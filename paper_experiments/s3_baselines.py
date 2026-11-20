@@ -25,7 +25,7 @@ import torch.nn.functional as F
 import torchvision
 from torchvision.ops import roi_align
 
-from pe_common import DEV, auc_macro_ovr, evaluate, fmt, save_json, seed_all, split_val, summarize, train_head
+from pe_common import DEV, auc_macro_ovr, evaluate, evaluate_all, fmt, save_json, seed_all, split_val, summarize, train_head
 
 CACHE = os.environ.get("PE_CACHE", "/content/cache/vb")
 RAW = os.environ.get("PE_RAW", "/content/vb_raw/data/Vertibench")
@@ -116,13 +116,19 @@ class SplitNN(nn.Module):
         return self.top(torch.cat([b(x) for b, x in zip(self.bottoms, xs)], 1))
 
 
+def evaluate_all_from(p, y):
+    from pe_common import metrics_from_proba
+
+    return metrics_from_proba(y.cpu().numpy(), p.cpu().numpy())
+
+
 def run_splitnn(a):
     ytr_all = torch.from_numpy(np.load(f"{CACHE}/labels_train.npy")).to(DEV)
     yte = torch.from_numpy(np.load(f"{CACHE}/labels_test.npy")).to(DEV)
     Xtr_all, ch = load_images("train", a.bands, a.res)
     Xte, _ = load_images("test", a.bands, a.res)
     ncls = int(ytr_all.max()) + 1
-    runs, secs, probs = [], [], []
+    runs, secs, all_probs = [], [], []
     for seed in [int(s) for s in a.seeds.split(",")]:
         seed_all(seed)
         tr, va = split_val(len(ytr_all), seed, 0.15, ytr_all.cpu().numpy())
@@ -165,18 +171,18 @@ def run_splitnn(a):
             print(f"seed {seed} ep {ep + 1}/{a.epochs} val_loss {vl:.4f} ({time.time() - t0:.0f}s)", flush=True)
         model.load_state_dict(best_state)
         model.eval()
-        probs = []
+        chunks = []
         with torch.no_grad():
             for i in range(0, len(yte), 256):
                 idx = torch.arange(i, min(len(yte), i + 256), device=DEV)
-                probs.append(F.softmax(forward(Xte, idx, False).float(), 1))
-        p = torch.cat(probs)
-        runs.append({"acc": (p.argmax(1) == yte).float().mean().item(), "auc": auc_macro_ovr(yte.cpu().numpy(), p.cpu().numpy())})
-        probs.append(p.cpu().numpy())
+                chunks.append(F.softmax(forward(Xte, idx, False).float(), 1))
+        p = torch.cat(chunks)
+        runs.append(evaluate_all_from(p, yte))
+        all_probs.append(p.cpu().numpy())
         secs.append(time.time() - t0)
         print("SEED", seed, runs[-1], flush=True)
         save_json(f"baseline_splitnn_{a.bands}{a.tag}.json", {"summary": summarize(runs), "secs_per_seed": secs, "epochs": a.epochs, "batch_size": a.bs,
-                                                              "pretrained": a.pretrained, "test_probs_seed_mean": np.mean(probs, 0).round(5).tolist(), "input_hw": int(Xte.shape[-1]), "gpu": torch.cuda.get_device_name() if DEV.type == "cuda" else "cpu", "peak_mem_gb": torch.cuda.max_memory_allocated() / 1e9 if DEV.type == "cuda" else 0})
+                                                              "pretrained": a.pretrained, "test_probs_seed_mean": np.mean(all_probs, 0).round(5).tolist(), "input_hw": int(Xte.shape[-1]), "gpu": torch.cuda.get_device_name() if DEV.type == "cuda" else "cpu", "peak_mem_gb": torch.cuda.max_memory_allocated() / 1e9 if DEV.type == "cuda" else 0})
     print("SplitNN", a.bands, fmt(summarize(runs)), flush=True)
 
 
@@ -218,13 +224,20 @@ def run_ssl(a):
     Xtr, ch = load_images("train", a.bands, a.res)
     Xte, _ = load_images("test", a.bands, a.res)
     crop = 64 if a.res == 80 else 128  # SimCLR views: random resized crops; features: whole image
-    feats_tr = torch.zeros(len(ytr_all), 16, 512, device=DEV)
-    feats_te = torch.zeros(len(yte), 16, 512, device=DEV)
+    nat = a.method == "nat"  # FedOnce's own objective: Noise As Targets (Bojanowski & Joulin 2017), d = 64
+    dim = 64 if nat else 512
+    feats_tr = torch.zeros(len(ytr_all), 16, dim, device=DEV)
+    feats_te = torch.zeros(len(yte), 16, dim, device=DEV)
     t0 = time.time()
     for p in range(16):
         seed_all(100 + p)
         enc = resnet18(len(ch), a.res == 80).to(DEV).to(memory_format=torch.channels_last)
-        proj = nn.Sequential(nn.Linear(512, 512), nn.ReLU(), nn.Linear(512, 128)).to(DEV)
+        proj = nn.Sequential(nn.Linear(512, 512), nn.ReLU(), nn.Linear(512, 128)).to(DEV) if not nat else nn.Linear(512, dim).to(DEV)
+        if nat:
+            from scipy.optimize import linear_sum_assignment
+
+            targets = F.normalize(torch.randn(len(Xtr), dim, device=DEV), dim=1)  # fixed noise on the sphere
+            assign = torch.randperm(len(Xtr), device=DEV)  # sample i -> target assign[i]
         opt = torch.optim.Adam(list(enc.parameters()) + list(proj.parameters()), lr=1e-3, weight_decay=1e-5)
         n = len(Xtr)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.epochs * (n // a.bs))
@@ -235,10 +248,20 @@ def run_ssl(a):
             perm = torch.randperm(n, device=DEV)
             tot = 0.0
             for i in range(0, n - a.bs + 1, a.bs):  # all unlabeled TRAIN-split images of this party (test never seen)
-                x = normalise(Xp_tr[perm[i : i + a.bs]], ch)
-                with torch.autocast("cuda", dtype=torch.float16):
-                    z1, z2 = proj(enc(simclr_view(x, crop))), proj(enc(simclr_view(x, crop)))
-                loss = nt_xent(z1.float(), z2.float())
+                bi = perm[i : i + a.bs]
+                x = normalise(Xp_tr[bi], ch)
+                if nat:
+                    with torch.autocast("cuda", dtype=torch.float16):
+                        z = F.normalize(proj(enc(simclr_view(x, crop))).float(), dim=1)
+                    if ep % 3 == 0:  # re-assign the batch's targets among its samples (Hungarian), every 3 epochs
+                        T = targets[assign[bi]]
+                        r, c = linear_sum_assignment(-(z.detach() @ T.T).cpu().numpy())
+                        assign[bi[torch.as_tensor(r, device=DEV)]] = assign[bi][torch.as_tensor(c, device=DEV)]
+                    loss = ((z - targets[assign[bi]]) ** 2).sum(1).mean()
+                else:
+                    with torch.autocast("cuda", dtype=torch.float16):
+                        z1, z2 = proj(enc(simclr_view(x, crop))), proj(enc(simclr_view(x, crop)))
+                    loss = nt_xent(z1.float(), z2.float())
                 opt.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
                 scaler.step(opt)
@@ -251,7 +274,8 @@ def run_ssl(a):
         with torch.no_grad(), torch.autocast("cuda", dtype=torch.float16):
             for X, out in ((Xp_tr, feats_tr), (Xp_te, feats_te)):
                 for i in range(0, len(X), 256):
-                    out[i : i + 256, p] = enc(normalise(X[i : i + 256], ch)).float()
+                    h = enc(normalise(X[i : i + 256], ch)).float()
+                    out[i : i + 256, p] = F.normalize(proj(h).float(), dim=1) if nat else h
         del Xp_tr, Xp_te
     ssl_secs = time.time() - t0
     runs = []
@@ -259,11 +283,10 @@ def run_ssl(a):
         tr, va = split_val(len(ytr_all), seed, 0.15, ytr_all.cpu().numpy())
         tr, va = torch.from_numpy(tr).to(DEV), torch.from_numpy(va).to(DEV)
         m = train_head(feats_tr[tr], ytr_all[tr], feats_tr[va], ytr_all[va], ncls, "mlp2", seed=seed)
-        acc, auc = evaluate(m, feats_te, yte)
-        runs.append({"acc": acc, "auc": auc})
+        runs.append(evaluate_all(m, feats_te, yte))
     s = summarize(runs)
-    print("FedOnce-SSL", a.bands, fmt(s), f"SSL pre-training {ssl_secs:.0f}s", flush=True)
-    save_json(f"baseline_ssl_{a.bands}{a.tag}.json", {"summary": s, "ssl_pretrain_secs_all_parties": ssl_secs, "epochs": a.epochs, "batch_size": a.bs, "feature_dim": 512, "input_hw": int(Xte.shape[-1]), "crop_hw": crop, "gpu": torch.cuda.get_device_name() if DEV.type == "cuda" else "cpu"})
+    print("FedOnce-" + a.method, a.bands, fmt(s), f"party-side pre-training {ssl_secs:.0f}s", flush=True)
+    save_json(f"baseline_{'nat' if nat else 'ssl'}_{a.bands}{a.tag}.json", {"summary": s, "ssl_pretrain_secs_all_parties": ssl_secs, "epochs": a.epochs, "batch_size": a.bs, "feature_dim": dim, "input_hw": int(Xte.shape[-1]), "crop_hw": crop, "gpu": torch.cuda.get_device_name() if DEV.type == "cuda" else "cpu"})
 
 
 if __name__ == "__main__":
@@ -275,6 +298,7 @@ if __name__ == "__main__":
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--bs", type=int, default=None)
     ap.add_argument("--pretrained", action="store_true", help="ImageNet-initialised ResNet-18 bottoms (RGB only)")
+    ap.add_argument("--method", default="simclr", choices=["simclr", "nat"], help="party-side objective for mode ssl")
     a = ap.parse_args()
     a.res = 80 if a.res == "80" else "full"
     a.tag = ("_r80" if a.res == 80 else "") + ("_pt" if a.pretrained else "")
