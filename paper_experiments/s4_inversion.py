@@ -28,6 +28,9 @@ from pe_common import DEV, OUT, save_json, seed_all
 
 CACHE = os.environ.get("PE_CACHE", "/content/cache/vb")
 EPOCHS = int(os.environ.get("PE_INV_EPOCHS", "15"))
+V2 = bool(os.environ.get("PE_INV_V2"))  # revised attacker: one shared decoder (no per-party 1536x1536 maps), AdamW at
+# 1e-3 for more epochs, inputs normalised with the statistics of the (perturbed) uploads the attacker actually sees,
+# a closed-form linear (ridge) decoder as a second attacker, and re-identification counted per location
 EX = [0, 97, 211, 333, 452, 571, 690, 777]  # test samples shown in the figure (party 0)
 
 import s2_vertibench_heads as s2  # noqa: E402  (re-use the exact compressor of stage 2)
@@ -74,11 +77,12 @@ def gdp_mu(eps, delta=1e-5):
 
 
 class Decoder(nn.Module):
-    def __init__(self, d, joint=False, n_parties=16):
+    def __init__(self, d, joint=False, n_parties=16, shared=False):
         super().__init__()
-        self.joint, self.d = joint, d
-        self.A = nn.Parameter(torch.eye(d).repeat(n_parties, 1, 1))  # per-party alignment
-        self.b = nn.Parameter(torch.zeros(n_parties, d))
+        self.joint, self.d, self.shared = joint, d, shared
+        if not shared:
+            self.A = nn.Parameter(torch.eye(d).repeat(n_parties, 1, 1))  # per-party alignment
+            self.b = nn.Parameter(torch.zeros(n_parties, d))
         self.fc = nn.Sequential(nn.Linear(n_parties * d + n_parties if joint else d, 512 * 4 * 4), nn.ReLU())
         blocks, c = [], 512
         for c_out in (256, 128, 64, 32):  # 4 -> 8 -> 16 -> 32 -> 64
@@ -90,7 +94,7 @@ class Decoder(nn.Module):
         if self.joint:  # z [B,16,d]; party = target party [B]
             z = torch.einsum("bkd,kde->bke", z, self.A) + self.b
             z = torch.cat([z.flatten(1), F.one_hot(party, 16).float()], 1)
-        else:  # z [B,d]; party = sender [B]
+        elif not self.shared:  # z [B,d]; party = sender [B]
             out = torch.empty_like(z)
             for p in party.unique():
                 m = party == p
@@ -126,6 +130,62 @@ def reid(rec, tgt, chunk=1024):
     return {"top1": (ranks <= 1).float().mean().item() * 100, "top10": (ranks <= 10).float().mean().item() * 100, "median_rank": ranks.median().item(), "n": len(ranks)}
 
 
+def reid_loc(rec, tgt, n_views=16, chunk=512):
+    """Per-location re-identification: the locations are ranked by their closest thumbnail (any date) to the
+    reconstruction; top-1 = the closest location is the true one. rec/tgt rows are ordered location-major."""
+    R, T = rec.float().flatten(1), tgt.float().flatten(1)
+    tn = (T * T).sum(1)
+    L = len(T) // n_views
+    ranks = []
+    for i in range(0, len(R), chunk):
+        r = R[i : i + chunk]
+        d = ((r * r).sum(1, keepdim=True) - 2 * r @ T.T + tn[None]).view(len(r), L, n_views).min(2).values
+        loc = torch.arange(i, i + len(r), device=R.device) // n_views
+        own = d[torch.arange(len(r)), loc]
+        ranks.append((d < own[:, None]).sum(1) + 1)
+    ranks = torch.cat(ranks).float()
+    return {"top1": (ranks <= 1).float().mean().item() * 100, "top10": (ranks <= 10).float().mean().item() * 100, "median_rank": ranks.median().item(), "n_locations": L}
+
+
+def ridge_decoder(Ztr, Zte, Ttr, Tte, pert):
+    """Closed-form linear decoder from one upload to the 64x64 thumbnail, lambda chosen on 10 % of the training locations."""
+    g = torch.Generator(device=DEV).manual_seed(7)
+    Xtr = (pert(Ztr.flatten(0, 1), torch.arange(16, device=DEV).repeat(len(Ztr)), g) if pert is not None else Ztr.flatten(0, 1)).float()
+    Xte = (pert(Zte.flatten(0, 1), torch.arange(16, device=DEV).repeat(len(Zte)), torch.Generator(device=DEV).manual_seed(4242)) if pert is not None else Zte.flatten(0, 1)).float()
+    Y = Ttr.flatten(0, 1).flatten(1).float() / 255
+    n_loc = len(Ztr)
+    hold = torch.zeros(n_loc, dtype=torch.bool, device=DEV)
+    hold[torch.randperm(n_loc, generator=torch.Generator().manual_seed(0))[: n_loc // 10].to(DEV)] = True
+    hold = hold.repeat_interleave(16)
+    mu, sd = Xtr.mean(0), Xtr.std(0).clamp_min(1e-6)
+    A = torch.cat([(Xtr - mu) / sd, torch.ones(len(Xtr), 1, device=DEV)], 1)
+    At = torch.cat([(Xte - mu) / sd, torch.ones(len(Xte), 1, device=DEV)], 1)
+
+    def fit(M, Yt, lam):
+        G = (M.T @ M).double()
+        R = lam * torch.eye(G.shape[0], device=DEV, dtype=torch.float64) * G.diagonal().mean()
+        R[-1, -1] = 0
+        return torch.linalg.solve(G + R, (M.T @ Yt).double()).float()
+
+    best = None
+    for lam in (1e-4, 1e-3, 1e-2, 1e-1, 1.0):
+        W = fit(A[~hold], Y[~hold], lam)
+        mse = ((A[hold] @ W).clamp(0, 1) - Y[hold]).pow(2).mean().item()
+        if best is None or mse < best[0]:
+            best = (mse, lam)
+    W = fit(A, Y, best[1])
+    rec = (At @ W).clamp(0, 1).float().view(-1, 3, 64, 64)
+    tgt = Tte.flatten(0, 1).float() / 255
+    P, S = [], []
+    for i in range(0, len(rec), 2048):
+        P.append(psnr(rec[i : i + 2048], tgt[i : i + 2048]))
+        S.append(ssim(rec[i : i + 2048], tgt[i : i + 2048]))
+    r16, t16 = F.avg_pool2d(rec, 4), F.avg_pool2d(tgt, 4)
+    ex = (rec.view(len(Zte), 16, 3, 64, 64)[torch.tensor([e % len(Zte) for e in EX], device=DEV), 0] * 255).byte().cpu().numpy()
+    return {"psnr": torch.cat(P).mean().item(), "ssim": torch.cat(S).mean().item(), "lambda_rel": best[1],
+            "reid": reid(r16, t16), "reid_loc": reid_loc(r16, t16)}, ex
+
+
 def psnr(x, y):
     return 10 * torch.log10(1.0 / F.mse_loss(x, y, reduction="none").mean((1, 2, 3)).clamp_min(1e-10))
 
@@ -154,9 +214,9 @@ def conditions(Ftr):
         "full, 8-bit": (det(1536, 8), None),
         "full, 4-bit": (det(1536, 4), None),
         "full, 1-bit": (det(1536, 1), None),
-        "PCA-256": (det(256, 32), None),
-        "PCA-64": (det(64, 32), None),
-        "PCA-16": (det(16, 32), None),
+        "PCA-256": (det(256, 16 if V2 else 32), None),
+        "PCA-64": (det(64, 16 if V2 else 32), None),
+        "PCA-16": (det(16, 16 if V2 else 32), None),
         "PCA-64, 4-bit": (det(64, 4), None),
         "PCA-16, 4-bit": (det(16, 4), None),
         "noise rho=1": (ident, noise(1.0)),
@@ -172,15 +232,18 @@ def train_eval(Ztr, Zte, Ttr, Tte, pert, joint, seed=0):
     """Ztr [N,16,d], Ttr uint8 [N,16,3,64,64]; returns mean PSNR/SSIM on the test uploads + 8 example reconstructions."""
     seed_all(seed)
     d = Ztr.shape[-1]
-    mu, sd = Ztr.mean((0, 1), keepdim=True), Ztr.std((0, 1), keepdim=True).clamp_min(1e-6)  # monotone rescaling only
+    Zstat = pert(Ztr, None, torch.Generator(device=DEV).manual_seed(99)) if (V2 and pert is not None) else Ztr
+    mu, sd = Zstat.mean((0, 1), keepdim=True), Zstat.std((0, 1), keepdim=True).clamp_min(1e-6)  # monotone rescaling only
     g_te = torch.Generator(device=DEV).manual_seed(4242)
     Zte_in = pert(Zte, None, g_te) if pert is not None else Zte  # one fixed release for the test uploads
-    dec = Decoder(d, joint).to(DEV)
-    opt = torch.optim.Adam(dec.parameters(), lr=2e-3)
+    dec = Decoder(d, joint, shared=V2).to(DEV)
+    lr = 1e-3 if V2 else 2e-3
+    opt = torch.optim.AdamW(dec.parameters(), lr=lr, weight_decay=1e-4) if V2 else torch.optim.Adam(dec.parameters(), lr=lr)
     N = len(Ztr)
     pairs = torch.stack(torch.meshgrid(torch.arange(N, device=DEV), torch.arange(16, device=DEV), indexing="ij"), -1).flatten(0, 1)
     steps = EPOCHS * ((len(pairs) + 255) // 256)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=2e-3, total_steps=steps)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=steps)
+    tl, tn = 0.0, 0
     for _ in range(EPOCHS):
         dec.train()
         for idx in pairs[torch.randperm(len(pairs), device=DEV)].split(256):
@@ -191,10 +254,12 @@ def train_eval(Ztr, Zte, Ttr, Tte, pert, joint, seed=0):
             if pert is not None:  # a fresh draw at every step: the attacker knows the mechanism, not the noise
                 z = pert(z, None if joint else p)
             loss = F.mse_loss(dec((z - mu.squeeze(0)) / sd.squeeze(0) if not joint else (z - mu) / sd, p), Ttr[i, p].float() / 255)
+            tl, tn = tl + loss.item() * len(idx), tn + len(idx)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
             sched.step()
+        last_epoch_loss, tl, tn = tl / max(tn, 1), 0.0, 0
     dec.eval()
     P, S, RECS = [], [], []
     te_pairs = torch.stack(torch.meshgrid(torch.arange(len(Zte), device=DEV), torch.arange(16, device=DEV), indexing="ij"), -1).flatten(0, 1)
@@ -213,9 +278,11 @@ def train_eval(Ztr, Zte, Ttr, Tte, pert, joint, seed=0):
         ex = (dec((z - mu.squeeze(0)) / sd.squeeze(0) if not joint else (z - mu) / sd, ex_p) * 255).byte().cpu().numpy()
     tgt_all = F.avg_pool2d(Tte.flatten(0, 1).float() / 255, 4)
     rr = reid(torch.cat(RECS).float(), tgt_all, chunk=1024) if not joint else None
-    out = {"psnr": torch.cat(P).mean().item(), "ssim": torch.cat(S).mean().item(), "train_loss_last": loss.item()}
+    out = {"psnr": torch.cat(P).mean().item(), "ssim": torch.cat(S).mean().item(), "train_loss_last": loss.item(), "train_loss_last_epoch": last_epoch_loss}
     if rr:
         out["reid"] = rr
+        if V2:
+            out["reid_loc"] = reid_loc(torch.cat(RECS).float(), tgt_all)
     return out, ex
 
 
@@ -243,6 +310,9 @@ def main():
     mc = Tf.mean((2, 3), keepdim=True).expand_as(Tf)  # oracle: each image replaced by its own mean colour
     res["mean_colour_oracle"] = {"psnr": psnr(mc, Tf).mean().item(), "ssim": ssim(mc, Tf).mean().item(),
                                  "reid": reid(F.avg_pool2d(mc, 4), F.avg_pool2d(Tf, 4))}
+    if V2:
+        res["mean_colour_oracle"]["reid_loc"] = reid_loc(F.avg_pool2d(mc, 4), F.avg_pool2d(Tf, 4))
+        res["mean_colour_oracle"]["train_mse"] = F.mse_loss(Ttr.flatten(0, 1).float().mean((2, 3), keepdim=True).expand(-1, -1, 64, 64) / 255, Ttr.flatten(0, 1).float() / 255).item()
     print("mean-colour oracle", res["mean_colour_oracle"], flush=True)
     J = torch.cat(J)
     examples["nearest_neighbour"] = Ttr.flatten(0, 1)[J[ex_idx * 16]].cpu().numpy()
@@ -257,6 +327,22 @@ def main():
         jobs += [("CLIP-L, full, 16-bit", "single"), ("CLIP-L, full, 16-bit", "joint")]
     except FileNotFoundError:
         Ctr = None
+    if V2:
+        KEY = ("full, 16-bit",)
+        keep = ("full, 16-bit", "PCA-64", "PCA-16", "DP eps=64", "DP eps=8", "CLIP-L, full, 16-bit")
+        jobs = [(n, m) for n, m in jobs if m == "single" and n in keep]
+        res["ridge"] = {}
+        for name, _ in jobs:
+            if name.startswith("CLIP"):
+                Ztr, Zte, pert = Ctr, Cte, None
+            else:
+                prep, pert = conds[name]
+                Ztr, Zte = prep(Ftr, Fte)
+            r, ex = ridge_decoder(Ztr, Zte, Ttr, Tte, pert)
+            res["ridge"][name] = r
+            examples[f"ridge:{name}"] = ex
+            print(f"ridge  {name:16s} PSNR {r['psnr']:.2f} dB  SSIM {r['ssim']:.3f}  reid-loc top1 {r['reid_loc']['top1']:.2f}", flush=True)
+            save_json(os.environ.get("PE_INV_OUT", "vb_inversion") + ".json", res)
     for name, mode in jobs:
         if name.startswith("CLIP"):
             Ztr, Zte, pert = Ctr, Cte, None

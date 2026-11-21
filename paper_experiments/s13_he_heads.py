@@ -80,8 +80,10 @@ def ds_generic(path):
 
 
 # ------------------------------------------------------------------ party-side preprocessing (no labels)
-def party_prep(parties, tr, d):
-    """Per-party PCA to d components (fitted on the party's own training rows) + standardisation."""
+def party_prep(parties, tr, d, scale="coord"):
+    """Per-party PCA to d components (fitted on the party's own training rows) + scaling: "coord" standardises every
+    coordinate (whitens the PCA scores); "block" divides the party's block by one scalar (its RMS coordinate std),
+    which keeps the relative variances and lets the ridge penalty shrink the low-variance directions more."""
     out = []
     for P in parties:
         mu = P[tr].mean(0)
@@ -90,6 +92,8 @@ def party_prep(parties, tr, d):
             _, _, Vt = np.linalg.svd(Z[tr], full_matrices=False)
             Z = Z @ Vt[:d].T
         sd = Z[tr].std(0) + 1e-6
+        if scale == "block":
+            sd = np.sqrt((sd**2).mean())
         out.append((Z / sd).astype(np.float64))
     return np.concatenate(out, 1)
 
@@ -120,6 +124,17 @@ def sel_metric(y, P, metric):
     return m["f1"] if metric == "f1" else m["acc"]
 
 
+def head_ridge_sel(Xs, y, tr, va, te, C, metric, balanced):
+    """Ridge with the party scaling ("coord" or "block") chosen on validation together with lambda."""
+    best = None
+    for sc, X in Xs.items():
+        P, info = head_ridge(X, y, tr, va, te, C, metric, balanced)
+        if best is None or info["val_score"] > best[1]["val_score"]:
+            info["scale"] = sc
+            best = (P, info)
+    return best
+
+
 def head_ridge(X, y, tr, va, te, C, metric, balanced):
     Y = np.eye(C)[y] * 2 - 1
     w = None
@@ -134,10 +149,10 @@ def head_ridge(X, y, tr, va, te, C, metric, balanced):
         sc = sel_metric(y[va], softmax_t(sv, 0.1), metric)
         if best is None or sc > best[0]:
             best = (sc, W, a)
-    _, W, a = best
+    vs, W, a = best
     sv = ridge_scores(X[va], W)
     t = min((0.01, 0.03, 0.1, 0.3, 1.0), key=lambda t: -np.log(softmax_t(sv, t)[np.arange(len(va)), y[va]] + 1e-12).mean())
-    return softmax_t(ridge_scores(X[te], W), t), {"lambda_rel": float(a), "temperature": t}
+    return softmax_t(ridge_scores(X[te], W), t), {"lambda_rel": float(a), "temperature": t, "val_score": float(vs)}
 
 
 def sig3(z):
@@ -193,11 +208,17 @@ def evaluate_dataset(name, ds, dims=(None, 256, 64, 16)):
             X = party_prep(parties, tr, d)
             heads = {"mlp2": lambda: head_torch(X, y, tr, va, te, C, "mlp2", si, balanced),
                      "linear_softmax": lambda: head_torch(X, y, tr, va, te, C, "linear", si, balanced),
-                     "ridge": lambda: head_ridge(X, y, tr, va, te, C, metric, balanced)}
+                     "ridge": lambda: head_ridge(X, y, tr, va, te, C, metric, balanced),
+                     "ridge_sel": lambda: head_ridge_sel({"coord": X, "block": party_prep(parties, tr, d, "block")}, y, tr, va, te, C, metric, balanced)}
             if X.shape[1] <= 4096:
                 heads["polylogistic"] = lambda: head_polylogistic(X, y, tr, va, te, C, metric)
+            only = os.environ.get("PE_HE_HEADS")
+            if only:
+                heads = {h: fn for h, fn in heads.items() if h in only.split(",")}
+            else:
+                heads.pop("ridge_sel")
             for h, fn in heads.items():
-                if d is None and h in ("ridge", "polylogistic") and X.shape[1] > 8192:
+                if d is None and h in ("ridge", "ridge_sel", "polylogistic") and X.shape[1] > 8192:
                     continue
                 t = time.time()
                 P, info = fn()
@@ -285,6 +306,9 @@ def main():
             continue
         res[name] = evaluate_dataset(name, ds)
         save_json(FN, res)
+    if os.environ.get("PE_HE_NOCOST"):
+        print("DONE", flush=True)
+        return
     try:
         import tenseal  # noqa: F401
     except Exception:

@@ -109,8 +109,12 @@ def train_head(
     train_transform=None,
     class_weight=None,
     patience=10,
+    select="loss",
 ):
     """Train a head on [N, K, d] (or [N, D]) tensors already on DEV. Returns the best-val-loss model.
+
+    ``select``: early-stopping criterion on the validation set: "loss" (unweighted cross-entropy, default),
+    "wloss" (cross-entropy weighted by ``class_weight``) or "f1" (macro F1, maximised).
 
     ``train_transform`` is applied to each training batch (e.g. party dropout, view sampling,
     noise); the validation set is left untouched unless the caller pre-transforms it.
@@ -140,10 +144,19 @@ def train_head(
             opt.step()
         model.eval()
         with torch.no_grad():
-            vl = 0.0
+            vl, preds = 0.0, []
             for i in range(0, len(Xva), 2048):
-                vl += F.cross_entropy(model(Xva[i : i + 2048].flatten(1)), yva[i : i + 2048], reduction="sum").item()
-            vl /= len(Xva)
+                o = model(Xva[i : i + 2048].flatten(1))
+                if select == "wloss" and w is not None:
+                    vl += F.cross_entropy(o, yva[i : i + 2048], weight=w, reduction="sum").item()
+                else:
+                    vl += F.cross_entropy(o, yva[i : i + 2048], reduction="sum").item()
+                preds.append(o.argmax(1))
+            vl /= float(w[yva].sum()) if (select == "wloss" and w is not None) else len(Xva)
+            if select == "f1":
+                from sklearn.metrics import f1_score
+
+                vl = -f1_score(yva.cpu().numpy(), torch.cat(preds).cpu().numpy(), average="macro", labels=np.arange(n_cls), zero_division=0)
         sched.step(vl)
         if vl < best:
             best, best_state, bad = vl, copy.deepcopy(model.state_dict()), 0

@@ -124,7 +124,7 @@ def heads(encs):
             print(f"{enc:10s} {key:40s} {fmt(out[key])}", flush=True)
             save_json("milk_reg.json", res)
 
-        def run(key, make_X, fit="plain", frac=1.0, transform=None):
+        def run(key, make_X, fit="plain", frac=1.0, transform=None, select="loss", wd=0.0):
             """make_X(tr) -> [N, D] numpy (or [N, V, D] with transform); returns per-fold (val, test) probabilities."""
             runs, probs = [], []
             for f, (tr, va, te) in enumerate(Fo):
@@ -142,7 +142,7 @@ def heads(encs):
                     Xv, Xt = Xm[va], Xm[te]
                 else:
                     tf = {"dropout": lambda xb: F.dropout(xb, 0.5, True), "noise": lambda xb: xb + 0.5 * torch.randn_like(xb)}.get(fit)
-                    m = train_head(X[tr], yt[tr], X[va], yt[va], C, arch="mlp2", seed=f, class_weight=cw, train_transform=tf)
+                    m = train_head(X[tr], yt[tr], X[va], yt[va], C, arch="mlp2", seed=f, class_weight=cw, train_transform=tf, select=select, weight_decay=wd)
                     Xv, Xt = X[va], X[te]
                 pv, pt = predict_proba(m, Xv).cpu().numpy(), predict_proba(m, Xt).cpu().numpy()
                 probs.append((pv, pt))
@@ -172,6 +172,15 @@ def heads(encs):
         run("concat", cat)
         late_runs("late fusion (weight on val)", pc, pd)
         late_runs("late fusion (fixed 0.5)", pc, pd, fixed=0.5)
+        if os.environ.get("PE_REG_EXTRA"):  # same early-stopping rule for every head: weighted val loss, or val macro F1
+            run("concat|rerun", cat)  # reference re-trained in the same run (features re-extracted on this VM)
+            pcr, pdr = run("clin|rerun", z("clin")), run("derm|rerun", z("derm"))
+            late_runs("late fusion (fixed 0.5)|rerun", pcr, pdr, fixed=0.5)
+            for sel in ("wloss", "f1"):
+                run(f"concat|stop {sel}", cat, select=sel)
+                pcs, pds = run(f"clin|stop {sel}", z("clin"), select=sel), run(f"derm|stop {sel}", z("derm"), select=sel)
+                late_runs(f"late fusion (fixed 0.5)|stop {sel}", pcs, pds, fixed=0.5)
+            run("concat + weight decay 1e-3|stop f1", cat, select="f1", wd=1e-3)
         run("concat + PCA-256 per party", lambda tr: np.concatenate([pca(P["clin"], tr, 256), pca(P["derm"], tr, 256)], 1))
         run("concat + input dropout 0.5", cat, fit="dropout")
         run("concat + feature noise 0.5", cat, fit="noise")
