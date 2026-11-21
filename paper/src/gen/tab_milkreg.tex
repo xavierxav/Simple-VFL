@@ -13,3 +13,7 @@ late fusion, mean of 8 views (upload $\times$1) & 60.5\,{\scriptsize$\pm$2.6} & 
 late $-$ concat, 25\,\% of the training folds & +1.5 & -0.2 & +0.7 \\
 late $-$ concat, 50\,\% of the training folds & +1.0 & +1.5 & +2.1 \\
 late $-$ concat, 100\,\% of the training folds & +2.4 & +2.2 & +2.2 \\
+\midrule
+late $-$ concat, stopping on the class-weighted val.\ loss & +0.7 & +1.2 & -- \\
+late $-$ concat, stopping on the val.\ macro F1 & +3.4 & +1.0 & -- \\
+\quad the same, concat with weight decay $10^{-3}$ & +2.8 & +2.0 & -- \\

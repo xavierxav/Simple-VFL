@@ -1,20 +1,21 @@
-full, 16-bit & 48\,KiB & 84.2\,{\scriptsize$\pm$0.6} & 25.0\,{\scriptsize$\pm$0.0} & 0.65 & 0.8 \\
-full, 8-bit & 24\,KiB & 84.4\,{\scriptsize$\pm$0.6} & 25.0 & 0.65 & 0.9 \\
-full, 4-bit & 12\,KiB & 84.3\,{\scriptsize$\pm$0.7} & 25.0 & 0.65 & 0.9 \\
-full, 1-bit & 3\,KiB & 82.9\,{\scriptsize$\pm$0.9} & 24.2 & 0.64 & 0.5 \\
+full, 16-bit & 48\,KiB & 84.2\,{\scriptsize$\pm$0.6} & 25.2 & 0.65$^{s}$ & 1.78 & 3.8 \\
+full, 8-bit & 24\,KiB & 84.4\,{\scriptsize$\pm$0.6} & 25.2 & 0.65$^{s}$ & 1.78 & 4.0 \\
+full, 4-bit & 12\,KiB & 84.3\,{\scriptsize$\pm$0.7} & 25.1 & 0.65$^{s}$ & 1.58 & 3.6 \\
+full, 1-bit & 3\,KiB & 82.9\,{\scriptsize$\pm$0.9} & 24.4 & 0.64$^{s}$ & 0.76 & 2.4 \\
 \midrule
-PCA-256 & 8\,KiB & 85.2\,{\scriptsize$\pm$0.4} & 24.2 & 0.65 & 0.5 \\
-PCA-64 & 2\,KiB & 83.8\,{\scriptsize$\pm$0.3} & 24.1\,{\scriptsize$\pm$0.0} & 0.65 & 0.3 \\
-PCA-16 & 512\,B & 82.1\,{\scriptsize$\pm$0.5} & 23.0 & 0.64 & 0.1 \\
+PCA-256 & 8\,KiB & 85.2\,{\scriptsize$\pm$0.4} & 24.2$^{s}$ & 0.65$^{s}$ & 0.48$^{s}$ & 1.5 \\
+PCA-64 & 2\,KiB & 83.8\,{\scriptsize$\pm$0.3} & 24.1$^{s}$ & 0.65$^{s}$ & 0.32 & 1.2 \\
+PCA-16 & 512\,B & 82.1\,{\scriptsize$\pm$0.5} & 23.0$^{s}$ & 0.64$^{s}$ & 0.09 & 0.6 \\
 \midrule
-PCA-64, 4-bit & 512\,B & 83.9\,{\scriptsize$\pm$0.7} & 23.9 & 0.65 & 0.2 \\
-PCA-16, 4-bit & 128\,B & 81.9\,{\scriptsize$\pm$0.4} & 22.9 & 0.64 & 0.1 \\
+PCA-64, 4-bit & 512\,B & 83.9\,{\scriptsize$\pm$0.7} & 23.9$^{s}$ & 0.65$^{s}$ & 0.28 & 1.3 \\
+PCA-16, 4-bit & 128\,B & 81.9\,{\scriptsize$\pm$0.4} & 22.9$^{s}$ & 0.64$^{s}$ & 0.08 & 0.6 \\
 \midrule
-clip + noise, $\varepsilon=64$ & 48\,KiB & 60.4\,{\scriptsize$\pm$1.7} & 19.7 & 0.61 & 0.0 \\
-clip + noise, $\varepsilon=8$ & 48\,KiB & 52.5\,{\scriptsize$\pm$1.6} & 19.0\,{\scriptsize$\pm$0.0} & 0.59 & 0.0 \\
+clip + noise, $\varepsilon=64$ & 48\,KiB & 60.4\,{\scriptsize$\pm$1.7} & 20.1 & 0.61 & 0.02 & 0.2 \\
+clip + noise, $\varepsilon=8$ & 48\,KiB & 52.5\,{\scriptsize$\pm$1.6} & 19.0 & 0.59 & 0.02 & 0.2$^{\ell}$ \\
 \midrule
-CLIP-L, full, 16-bit & 32\,KiB & 85.2\,{\scriptsize$\pm$0.8} & 25.3 & 0.65 & 0.9 \\
+CLIP-L, full, 16-bit & 32\,KiB & 85.2\,{\scriptsize$\pm$0.8} & 25.5 & 0.65$^{s}$ & 2.00 & 4.1 \\
 \midrule
-\emph{reference:} mean training image & -- & -- & 19.0 & 0.59 & 0.0 \\
-\emph{reference:} each image's mean colour & -- & -- & 27.0 & 0.67 & 5.0 \\
-\emph{reference:} nearest training image & -- & -- & 21.2 & 0.51 & -- \\
+\emph{reference:} mean training image & -- & -- & 19.0 & 0.59 & 0.0 & -- \\
+\emph{reference:} each image's mean colour & -- & -- & 27.0 & 0.67 & 4.98 & 6.3 \\
+\emph{reference:} nearest training image & -- & -- & 21.2 & 0.51 & -- & -- \\
+\emph{chance} & -- & -- & -- & -- & 0.01 & 0.1 \\
