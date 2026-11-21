@@ -221,7 +221,17 @@ def main():
     path = os.path.join(OUT, "classic.json")
     res = json.load(open(path)) if os.path.exists(path) else {}
     for ds in a.datasets.split(","):
-        if ds.startswith("cifar"):
+        if ds.startswith("cifar") and os.environ.get("PE_CLASSIC_HE_ONLY"):  # only the top/bottom party features for stage 13
+            features_cifar(ds, enc, ["top", "bottom"])
+            _, y, ntr = cifar(ds)
+            split = np.zeros(len(y), int)
+            split[ntr:] = 2
+            d = os.environ.get("PE_HE_DS", "/content/he_ds")
+            os.makedirs(d, exist_ok=True)
+            np.savez(f"{d}/he_ds_{ds}_{enc[0]}_topbottom.npz", n_parties=2, p0=np.load(f"{ROOT}/f_{ds}_{enc[0]}_top.npy").astype(np.float16),
+                     p1=np.load(f"{ROOT}/f_{ds}_{enc[0]}_bottom.npy").astype(np.float16), y=y, split=split, metric="acc")
+            print("he_ds", ds, flush=True)
+        elif ds.startswith("cifar"):
             pieces = list(PIECES) if ds == "cifar10" else ["full", "top", "bottom", "q0", "q1", "q2", "q3"]
             features_cifar(ds, enc, pieces)
             heads_cifar(ds, enc, res)
