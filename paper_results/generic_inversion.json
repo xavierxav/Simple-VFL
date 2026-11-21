@@ -1,0 +1,50 @@
+{
+ "vb": {
+  "n_test": 785,
+  "n_attacked": 160,
+  "check_cos_pooled": 0.9999959468841553,
+  "linkage_clip": {
+   "top1": 100.0,
+   "top10": 100.0,
+   "median_rank": 1.0,
+   "n_gallery": 785
+  },
+  "mean_colour": {
+   "psnr": 28.20425033569336,
+   "ssim": 0.7001007199287415,
+   "reid_pix": {
+    "top1": 15.000000953674316,
+    "top10": 45.0,
+    "median_rank": 14.0
+   }
+  },
+  "chance_top1": 0.12738853503184713,
+  "paper upload": {
+   "psnr": 13.060882568359375,
+   "ssim": 0.34224313497543335,
+   "reid_pix": {
+    "top1": 0.625,
+    "top10": 3.125,
+    "median_rank": 349.0
+   },
+   "reid": {
+    "top1": 3.125,
+    "top10": 12.5,
+    "median_rank": 137.0,
+    "n_gallery": 785
+   },
+   "cos_to_source": 0.5386536717414856,
+   "labels": {
+    "recon": {
+     "acc": 58.75,
+     "f1": 44.89229102595135
+    },
+    "real": {
+     "acc": 68.75,
+     "f1": 65.03035008469791
+    }
+   },
+   "secs": 622
+  }
+ }
+}
