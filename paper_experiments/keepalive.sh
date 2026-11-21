@@ -21,4 +21,5 @@ while [ "$(date +%s)" -lt $end ]; do
   [ -f /tmp/stop_keepalive_$S ] && { echo "stop requested"; exit 0; }
   sleep 240
 done
-echo "$(date +%H:%M) time limit reached (session $S left running)"
+VB_SESSION=$S bash paper_experiments/vbctl.sh fetch "paper: results ($S, time limit)" > /dev/null 2>&1
+colab stop -s "$S"; echo "$(date +%H:%M) time limit reached, $S stopped"
