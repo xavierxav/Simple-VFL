@@ -818,6 +818,10 @@ for key, lab, k in HEDS:
         if s:
             macro(f"he{t}{tag}", f1(s[met]))
 write("tab_he.tex", "\n".join(rows))
+_c = (he.get("cifar100_dinov2_g_topbottom") or {}).get("pca64", {})  # CIFAR-100, PCA-64: squared loss vs linear softmax
+for h, tag in (("linear_softmax", "Lin"), ("mlp2", "Mlp"), ("ridge", "Ridge")):
+    if h in _c:
+        macro(f"heCHundredSf{tag}", f1(_c[h]["acc"]))
 hc = he.get("he_cost", {})
 for key, tag in (("milk10k/dinov2_g/pca64", "Milk"), ("vertibench/dinov2_g_224/pca16", "VbSt"), ("vertibench/dinov2_g_224/pca64", "VbSf")):
     c = hc.get(key)
