@@ -810,6 +810,8 @@ def gi_macros(tag, r):
 
 
 v = gi.get("vb", {})
+macro("giVbChanceFone", f1(100 / 4))  # label-independent guessing with the class priors: macro F1 = 1 / number of classes
+macro("giMilkChanceFone", f1(100 / 7))
 if v:
     gi_macros("Vb", v.get("paper upload"))
     gi_macros("VbClip", v.get("CLIP preprocessing"))
@@ -861,8 +863,6 @@ if d.get("utility"):
             else:
                 cells.append(f1(c["linkage"]["top1"]) if c else "--")
         dk = [x for x in DC if x.startswith(key + "|")]
-        for dd in (DC.get(f"{key}|k=0") or DC.get(f"{key}|k=direct"), DC.get(f"{key}|k=1000")):  # decoded: no pairs, 1,000 pairs
-            cells.append(f1(dd["reid"]["top1"]) if dd else "--")
         rows.append(f"{lab} & " + " & ".join(cells) + " \\\\")
         t = {"plain": "Plain", "rotation": "Rot", "PCA-64": "Pca", "autoencoder-100": "Ae", "noise-as-targets-100": "Nat", "one-layer split learning-100": "Split"}[key]
         macro(f"gd{t}Acc", f1(u["acc"]))
@@ -876,12 +876,14 @@ if d.get("utility"):
             if "labels" in DC[x]:
                 macro(f"gd{t}Dec{x.split('=')[1].title()}Lab", f1(DC[x]["labels"]["recon"]["acc"]))
     macro("gdKs", ", ".join(str(k) for k in ks if k))
+    for key, t in (("rotation", "Rot"), ("PCA-64", "Pca"), ("autoencoder-100", "Ae"), ("noise-as-targets-100", "Nat"), ("one-layer split learning-100", "Split")):
+        if key in U and "plain" in U:
+            macro(f"gd{t}Drop", f1(U["plain"]["acc"] - U[key]["acc"]))
     macro("gdNDec", str(DC.get("n", 0)))
     sp = U.get("one-layer split learning-100", {})
     if "epochs" in sp:
         macro("gdSplitEpochs", f"{np.mean(sp['epochs']):.0f}")
     write("tab_defences.tex", "\n".join(rows))
-    write("tab_defences_head.tex", " & ".join(["k=0" if k == 0 else f"{k:,}".replace(",", "{,}") for k in ks]))
 if GI_NPZ is not None:
     z = GI_NPZ
 
