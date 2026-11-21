@@ -147,8 +147,9 @@ def reid_loc(rec, tgt, n_views=16, chunk=512):
     return {"top1": (ranks <= 1).float().mean().item() * 100, "top10": (ranks <= 10).float().mean().item() * 100, "median_rank": ranks.median().item(), "n_locations": L}
 
 
-def ridge_decoder(Ztr, Zte, Ttr, Tte, pert):
-    """Closed-form linear decoder from one upload to the 64x64 thumbnail, lambda chosen on 10 % of the training locations."""
+def ridge_decoder(Ztr, Zte, Ttr, Tte, pert, per_party=False):
+    """Closed-form linear decoder from one upload to the 64x64 thumbnail, lambda chosen on 10 % of the training locations.
+    per_party: one map per sender (for per-party PCA, whose bases differ between parties)."""
     g = torch.Generator(device=DEV).manual_seed(7)
     Xtr = (pert(Ztr.flatten(0, 1), torch.arange(16, device=DEV).repeat(len(Ztr)), g) if pert is not None else Ztr.flatten(0, 1)).float()
     Xte = (pert(Zte.flatten(0, 1), torch.arange(16, device=DEV).repeat(len(Zte)), torch.Generator(device=DEV).manual_seed(4242)) if pert is not None else Zte.flatten(0, 1)).float()
@@ -167,14 +168,22 @@ def ridge_decoder(Ztr, Zte, Ttr, Tte, pert):
         R[-1, -1] = 0
         return torch.linalg.solve(G + R, (M.T @ Yt).double()).float()
 
-    best = None
-    for lam in (1e-4, 1e-3, 1e-2, 1e-1, 1.0):
-        W = fit(A[~hold], Y[~hold], lam)
-        mse = ((A[hold] @ W).clamp(0, 1) - Y[hold]).pow(2).mean().item()
-        if best is None or mse < best[0]:
-            best = (mse, lam)
-    W = fit(A, Y, best[1])
-    rec = (At @ W).clamp(0, 1).float().view(-1, 3, 64, 64)
+    groups = [torch.arange(p, len(A), 16, device=DEV) for p in range(16)] if per_party else [torch.arange(len(A), device=DEV)]
+    groups_te = [torch.arange(p, len(At), 16, device=DEV) for p in range(16)] if per_party else [torch.arange(len(At), device=DEV)]
+    rec = torch.empty(len(At), Y.shape[1], device=DEV)
+    lams = []
+    for gi, gt in zip(groups, groups_te):  # rows are location-major: party p of location i is row 16 i + p
+        h = hold[gi]
+        best = None
+        for lam in (1e-4, 1e-3, 1e-2, 1e-1, 1.0):
+            W = fit(A[gi][~h], Y[gi][~h], lam)
+            mse = ((A[gi][h] @ W).clamp(0, 1) - Y[gi][h]).pow(2).mean().item()
+            if best is None or mse < best[0]:
+                best = (mse, lam)
+        lams.append(best[1])
+        rec[gt] = (At[gt] @ fit(A[gi], Y[gi], best[1])).clamp(0, 1)
+    best = (None, float(np.median(lams)))
+    rec = rec.view(-1, 3, 64, 64)
     tgt = Tte.flatten(0, 1).float() / 255
     P, S = [], []
     for i in range(0, len(rec), 2048):
@@ -228,7 +237,7 @@ def conditions(Ftr):
     return out, C
 
 
-def train_eval(Ztr, Zte, Ttr, Tte, pert, joint, seed=0):
+def train_eval(Ztr, Zte, Ttr, Tte, pert, joint, seed=0, shared=None):
     """Ztr [N,16,d], Ttr uint8 [N,16,3,64,64]; returns mean PSNR/SSIM on the test uploads + 8 example reconstructions."""
     seed_all(seed)
     d = Ztr.shape[-1]
@@ -236,7 +245,7 @@ def train_eval(Ztr, Zte, Ttr, Tte, pert, joint, seed=0):
     mu, sd = Zstat.mean((0, 1), keepdim=True), Zstat.std((0, 1), keepdim=True).clamp_min(1e-6)  # monotone rescaling only
     g_te = torch.Generator(device=DEV).manual_seed(4242)
     Zte_in = pert(Zte, None, g_te) if pert is not None else Zte  # one fixed release for the test uploads
-    dec = Decoder(d, joint, shared=V2).to(DEV)
+    dec = Decoder(d, joint, shared=V2 if shared is None else shared).to(DEV)
     lr = 1e-3 if V2 else 2e-3
     opt = torch.optim.AdamW(dec.parameters(), lr=lr, weight_decay=1e-4) if V2 else torch.optim.Adam(dec.parameters(), lr=lr)
     N = len(Ztr)
@@ -330,6 +339,8 @@ def main():
     if V2:
         KEY = ("full, 16-bit",)
         keep = ("full, 16-bit", "PCA-64", "PCA-16", "DP eps=64", "DP eps=8", "CLIP-L, full, 16-bit")
+        if os.environ.get("PE_INV_KEEP"):  # e.g. "PCA-64;PCA-16;full, 8-bit"
+            keep = tuple(os.environ["PE_INV_KEEP"].split(";"))
         jobs = [(n, m) for n, m in jobs if m == "single" and n in keep]
         res["ridge"] = {}
         for name, _ in jobs:
@@ -338,7 +349,8 @@ def main():
             else:
                 prep, pert = conds[name]
                 Ztr, Zte = prep(Ftr, Fte)
-            r, ex = ridge_decoder(Ztr, Zte, Ttr, Tte, pert)
+            r, ex = ridge_decoder(Ztr, Zte, Ttr, Tte, pert, per_party=name.startswith("PCA"))
+            r["per_party"] = name.startswith("PCA")
             res["ridge"][name] = r
             examples[f"ridge:{name}"] = ex
             print(f"ridge  {name:16s} PSNR {r['psnr']:.2f} dB  SSIM {r['ssim']:.3f}  reid-loc top1 {r['reid_loc']['top1']:.2f}", flush=True)
@@ -354,7 +366,9 @@ def main():
             seeds = (0, 1, 2) if (name in KEY and mode == "single") else (0,)
             rs = []
             for sd_ in seeds:
-                r_, ex_ = train_eval(Ztr, Zte, Ttr, Tte, pert, mode == "joint", seed=sd_)
+                # V2 shares one decoder across senders, except for per-party PCA (16 different bases): there the
+                # learned per-party affine alignment of V1 is kept
+                r_, ex_ = train_eval(Ztr, Zte, Ttr, Tte, pert, mode == "joint", seed=sd_, shared=(V2 and not name.startswith("PCA")) if V2 else None)
                 rs.append(r_)
                 if sd_ == 0:
                     r, ex = dict(r_), ex_
@@ -362,6 +376,7 @@ def main():
             r["psnr"] = float(np.mean(r["psnr_seeds"]))
             r["ssim"] = float(np.mean([x["ssim"] for x in rs]))
             r["secs"] = round(time.time() - t0)
+            r["shared_decoder"] = bool(V2 and not name.startswith("PCA"))
             res[mode][name] = r
             examples[f"{mode}:{name}"] = ex
             print(f"{mode:6s} {name:16s} PSNR {r['psnr']:.2f} dB  SSIM {r['ssim']:.3f}  ({r['secs']}s)", flush=True)
