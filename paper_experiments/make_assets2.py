@@ -789,6 +789,132 @@ if INV_NPZ and inv:
     fig.savefig(os.path.join(OUT, "fig_inversion.pdf"))
     plt.close(fig)
 
+# ------------------------------------------------------------------ generic public decoder (stage 20)
+gi = load("generic_inversion.json") or {}
+GI_NPZ = np.load(os.path.join(RES, "generic_inversion_examples.npz")) if os.path.exists(os.path.join(RES, "generic_inversion_examples.npz")) else None
+
+
+def gi_macros(tag, r):
+    if not r:
+        return
+    macro(f"gi{tag}Reid", f1(r["reid"]["top1"]))
+    macro(f"gi{tag}ReidTen", f1(r["reid"]["top10"]))
+    macro(f"gi{tag}MedRank", f"{r['reid']['median_rank']:.0f}")
+    macro(f"gi{tag}PixReid", f1(r["reid_pix"]["top1"]) if "reid_pix" in r else "--")
+    macro(f"gi{tag}Psnr", f1(r["psnr"]))
+    lab = r.get("labels", {})
+    for k, t in (("recon", "Lab"), ("real", "LabReal")):
+        if k in lab:
+            macro(f"gi{tag}{t}Acc", f1(lab[k]["acc"]))
+            macro(f"gi{tag}{t}Fone", f1(lab[k]["f1"]))
+
+
+v = gi.get("vb", {})
+if v:
+    gi_macros("Vb", v.get("paper upload"))
+    gi_macros("VbClip", v.get("CLIP preprocessing"))
+    macro("giVbN", str(v["n_attacked"]))
+    macro("giVbNTest", f"{v['n_test']:,}".replace(",", "{,}"))
+    macro("giVbChance", f"{100 / v['n_test']:.2f}")
+    macro("giVbChanceTen", f"{1000 / v['n_test']:.1f}")
+    macro("giVbCheck", f"{v.get('check_cos_pooled', float('nan')):.3f}")
+    macro("giLink", f1(v["linkage_clip"]["top1"]))
+    if "mean_colour" in v:
+        macro("giVbColourPixReid", f1(v["mean_colour"]["reid_pix"]["top1"]))
+    if "real_label_inference" in v:  # classifier on real test images of the party (upper reference)
+        macro("giVbRealAcc", f1(v["real_label_inference"]["recon"]["acc"]))
+        macro("giVbRealFone", f1(v["real_label_inference"]["recon"]["f1"]))
+    macro("giSecs", f"{v['paper upload']['secs'] / v['n_attacked']:.1f}" if "paper upload" in v else "--")
+m = gi.get("milk", {})
+for kind, tag in (("clin", "Clin"), ("derm", "Derm")):
+    o = m.get(kind)
+    if not o:
+        continue
+    gi_macros(f"Milk{tag}", o.get("upload"))
+    if "mean_colour" in o:
+        macro(f"giMilk{tag}ColourReid", f1(o["mean_colour"]["reid"]["top1"]))
+    if "real_label_inference" in o:
+        macro(f"giMilk{tag}RealFone", f1(o["real_label_inference"]["recon"]["f1"]))
+        macro(f"giMilk{tag}RealAcc", f1(o["real_label_inference"]["recon"]["acc"]))
+    macro("giMilkN", str(o["n_attacked"]))
+    macro("giMilkNGal", f"{o['n_gallery']:,}".replace(",", "{,}"))
+    macro("giMilkChance", f"{100 / o['n_gallery']:.2f}")
+    if "check_cos_pooled" in o:
+        macro("giMilkCheck", f"{o['check_cos_pooled']:.3f}")
+d = gi.get("defences", {})
+if d.get("utility"):
+    U, A, DC = d["utility"], d.get("attacks", {}), d.get("decoded", {})
+    macro("giCosMean", f"{d.get('cos_mean_embedding', float('nan')):.2f}")
+    NAMES = [("plain", "none (raw CLIP-L)"), ("rotation", "secret rotation"), ("PCA-64", "private PCA-64"), ("autoencoder-100", "autoencoder, 100"),
+             ("noise-as-targets-100", "noise as targets, 100"), ("one-layer split learning-100", "split learning, 1 layer, 100")]
+    ks = sorted({int(k[2:]) for a in A.values() for k in a if k[2:].isdigit()})
+    rows = []
+    for key, lab in NAMES:
+        u, a = U.get(key), A.get(key, {})
+        if not u:
+            continue
+        cells = [str(u["dim"]), pm(u)]
+        for k in ks:
+            c = a.get(f"k={k}")
+            if key == "plain":  # no map to learn: the public projection gives the embedding itself
+                cells.append(f1(v["linkage_clip"]["top1"]) if (k == 0 and v) else "--")
+            else:
+                cells.append(f1(c["linkage"]["top1"]) if c else "--")
+        dk = [x for x in DC if x.startswith(key + "|")]
+        for dd in (DC.get(f"{key}|k=0") or DC.get(f"{key}|k=direct"), DC.get(f"{key}|k=1000")):  # decoded: no pairs, 1,000 pairs
+            cells.append(f1(dd["reid"]["top1"]) if dd else "--")
+        rows.append(f"{lab} & " + " & ".join(cells) + " \\\\")
+        t = {"plain": "Plain", "rotation": "Rot", "PCA-64": "Pca", "autoencoder-100": "Ae", "noise-as-targets-100": "Nat", "one-layer split learning-100": "Split"}[key]
+        macro(f"gd{t}Acc", f1(u["acc"]))
+        for k in ks:
+            c = a.get(f"k={k}")
+            if c:
+                macro(f"gd{t}Link{k}", f1(c["linkage"]["top1"]))
+                macro(f"gd{t}Cos{k}", f"{c['cos']:.2f}")
+        for x in dk:
+            macro(f"gd{t}Dec{x.split('=')[1].title()}", f1(DC[x]["reid"]["top1"]))
+            if "labels" in DC[x]:
+                macro(f"gd{t}Dec{x.split('=')[1].title()}Lab", f1(DC[x]["labels"]["recon"]["acc"]))
+    macro("gdKs", ", ".join(str(k) for k in ks if k))
+    macro("gdNDec", str(DC.get("n", 0)))
+    sp = U.get("one-layer split learning-100", {})
+    if "epochs" in sp:
+        macro("gdSplitEpochs", f"{np.mean(sp['epochs']):.0f}")
+    write("tab_defences.tex", "\n".join(rows))
+    write("tab_defences_head.tex", " & ".join(["k=0" if k == 0 else f"{k:,}".replace(",", "{,}") for k in ks]))
+if GI_NPZ is not None:
+    z = GI_NPZ
+
+    def disp(img, stretch):
+        x = np.transpose(img, (1, 2, 0)).astype(float) / 255
+        if stretch:  # per image and channel, 2nd-98th percentile (dark Sentinel-2 L1C composites)
+            lo, hi = np.percentile(x, 2, axis=(0, 1)), np.percentile(x, 98, axis=(0, 1))
+            x = (x - lo) / np.maximum(hi - lo, 1e-3)
+        return np.clip(x, 0, 1)
+
+    blocks = [("vb__original", "vb__paper_upload", True, "VertiBench (one party)"), ("milk__clin__original", "milk__clin__upload", False, "MILK10k clinical"),
+              ("milk__derm__original", "milk__derm__upload", False, "MILK10k dermoscopic")]
+    blocks = [b for b in blocks if b[0] in z.files and b[1] in z.files]
+    if blocks:
+        ne = 4
+        fig, axs = plt.subplots(2, ne * len(blocks), figsize=(6.6, 1.38), squeeze=False)
+        for bi, (ko, kr, st, title) in enumerate(blocks):
+            for e in range(ne):
+                j = bi * ne + e
+                axs[0, j].imshow(disp(z[ko][e], st))
+                axs[1, j].imshow(disp(z[kr][e], False))
+                for i in (0, 1):
+                    axs[i, j].set_xticks([])
+                    axs[i, j].set_yticks([])
+                    for sp_ in axs[i, j].spines.values():
+                        sp_.set_visible(False)
+            axs[0, bi * ne].set_title(title, fontsize=6, loc="left")
+        axs[0, 0].set_ylabel("original", fontsize=6)
+        axs[1, 0].set_ylabel("decoded", fontsize=6)
+        fig.subplots_adjust(left=0.025, right=0.998, top=0.88, bottom=0.005, wspace=0.04, hspace=0.04)
+        fig.savefig(os.path.join(OUT, "fig_generic.pdf"))
+        plt.close(fig)
+
 # ------------------------------------------------------------------ linear / encryption-friendly heads
 HEDS = [("vertibench/dinov2_g_224", "VertiBench, DINOv2-g", 16), ("vertibench/clip_l14_224", "VertiBench, CLIP-L", 16),
         ("milk10k/dinov2_g", "MILK10k, DINOv2-g", 2), ("milk10k/clip_l14", "MILK10k, CLIP-L", 2),
@@ -849,7 +975,7 @@ for key, tag in (("milk10k/dinov2_g/pca64", "Milk"), ("vertibench/dinov2_g_224/p
 
 # ------------------------------------------------------------------ placeholders, so that the paper compiles on partial results
 for t in ("tab_main", "tab_encoders", "tab_combo_enc", "tab_classic", "tab_sun", "tab_milk", "tab_milkfusion", "tab_milkreg", "tab_freeze", "tab_ws", "tab_wsfusion",
-          "tab_pareto", "tab_privacy", "tab_he"):
+          "tab_pareto", "tab_privacy", "tab_he", "tab_defences"):
     if not os.path.exists(os.path.join(OUT, t + ".tex")):
         write(t + ".tex", "\\multicolumn{2}{@{}l}{(pending)}\\\\")
 
