@@ -1,10 +1,9 @@
 #!/bin/bash
 # Full GPU pipeline on a fresh Colab VM (download included).  Launch detached:  bash vbctl.sh launch chain 'bash run_chain.sh A'
-#   A: WorldStrat provider label, frozen features (s1), heads (s2), inversion (s4), timing (s6)
+#   A: frozen features (s1), heads (s2), inversion (s4), timing (s6)
 #   B: full-resolution end-to-end baselines (s3)
 #   C: RGB baselines and encoder timing only (re-run on a second GPU)
-#   D: why CLIP > DINOv2 (s7: encoder ablations, VertiBench <-> WorldStrat matching, geography), WorldStrat random
-#      5-fold CV (s5), and the reproduction of the published VertiBench SplitNN (s8)
+#   D: why CLIP > DINOv2 (s7: encoder ablations) and the reproduction of the published VertiBench SplitNN (s8)
 # Progress: /content/logs/chain.log (one log per step).  Ends with CHAIN_DONE (keepalive.sh then harvests and stops the VM).
 cd "$(dirname "$0")"
 L=/content/logs; mkdir -p $L /content/results /content/vb_raw
@@ -18,10 +17,6 @@ step() {
 }
 which aria2c > /dev/null || apt-get install -y -q aria2 > /dev/null 2>&1
 which 7z > /dev/null || apt-get install -y -q p7zip-full > /dev/null 2>&1
-if [ "$1" = A ]; then  # merge the provider label into the WorldStrat results already in the repository
-  cp -n ../paper_results/ws_results.json /content/results/ 2>/dev/null
-  step s5b s5_worldstrat.py --labels sources
-fi
 echo "$(date +%H:%M:%S) download"
 for i in $(seq 1 30); do
   [ -f /content/vb_raw/Vertibench.7z ] && [ ! -f /content/vb_raw/Vertibench.7z.aria2 ] && break
@@ -35,10 +30,8 @@ if [ "$1" = A ]; then
   step s4 s4_inversion.py
   step s6 s6_timing.py
 elif [ "$1" = D ]; then
-  cp -n ../paper_results/ws_results.json /content/results/ 2>/dev/null
   step s3pack s3_baselines.py pack
-  step s7 s7_vertibench_geo.py
-  step s5cv s5_worldstrat.py --regimes random_cv
+  step s7 s7_vb_encoders.py
   step s8 s8_vertibench_repro.py
 elif [ "$1" = C ]; then
   step s3pack s3_baselines.py pack

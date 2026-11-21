@@ -246,7 +246,7 @@ def e6():
         subprocess.run(f"{sys.executable} -m pip install -q torchgeo", shell=True)
         from torchgeo.models import ViTSmall16_Weights, vit_small_patch16_224
 
-        from s7_vertibench_geo import MEAN, STD
+        from s7_vb_encoders import MEAN, STD
 
         model = vit_small_patch16_224(weights=ViTSmall16_Weights.SENTINEL2_ALL_DINO, num_classes=0).to(DEV).eval()  # pooled CLS features
         m, s = MEAN.to(DEV)[None, :, None, None], STD.to(DEV)[None, :, None, None]
@@ -273,7 +273,7 @@ def main():
     main_name = os.environ.get("PE_MAIN", "dinov2_g_168")
     paired = os.environ.get("PE_PAIRED", "clip_l14_224,dinov2_g_168,dinov2_g_224").split(",")
     if not all(os.path.exists(f"{CACHE}/f7_{n}_test.npy") for n in [main_name] + paired):
-        from s7_vertibench_geo import extract_all
+        from s7_vb_encoders import extract_all
 
         extract_all()  # stage-7 encoders (cached when stage 7 already ran on this VM)
     G = feats(main_name)

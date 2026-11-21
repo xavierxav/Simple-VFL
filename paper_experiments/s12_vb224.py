@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from pe_common import DEV, evaluate_all, fmt, save_json, split_val, summarize, train_head
-from s7_vertibench_geo import prep
+from s7_vb_encoders import prep
 
 CACHE = os.environ.get("PE_CACHE", "/content/cache/vb")
 NAMES = ["dinov2_g_224", "clip_l14_224", "dinov2_l_224", "dinov2_b_224", "dinov2_s_224", "clip_b16_224", "siglip_b16_224",

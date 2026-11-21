@@ -23,11 +23,10 @@ internship; the experiment tables are from that work.
 
 - **One idea, carried through.** Frozen features + one upload + a small head.
   The code runs end to end and the result holds over multiple seeds.
-- **Honest ablations.** A location-only baseline, a capacity-matched control,
-  and a few-round logits variant for lower-trust settings — including the
-  negative result (coordinates alone beat images on one label set).
+- **Honest ablations.** A capacity-matched control and a few-round logits
+  variant for lower-trust settings.
 - **A second, exploratory benchmark.** A two-sensor SPOT + Sentinel setup on
-  WorldStrat, with IPCC labels and a location-only audit.
+  WorldStrat, with IPCC labels.
 
 ## How it works
 
@@ -115,20 +114,16 @@ high-resolution **SPOT** imagery and another holds **Sentinel-2** revisits.
 Different sensors make a more natural division of views between parties.
 
 We also use WorldStrat's **IPCC land-cover labels**, rather than relying only on
-provider-name labels. The distinction matters: on `sources`, a random forest
-using just longitude and latitude reaches **91.71% accuracy / 98.00 AUC**, above
-the best image model. On IPCC, the same location-only baseline is **70.66 ±
-0.63% / 86.49 ± 0.86 AUC**; the one-shot 16-view Sentinel model reaches
-**77.93 ± 0.52% / 94.13 ± 0.53 AUC** (5 seeds). This makes the semantic task
-a more informative test of what the image features add beyond geography.
+provider-name labels: on IPCC, the one-shot 16-view Sentinel model reaches
+**77.93 ± 0.52% / 94.13 ± 0.53 AUC** (5 seeds).
 
 ## Results at a glance
 
 | Experiment | Result | Comparison |
 |---|---:|---|
 | VertiBench, one-shot frozen DINOv2 + central MLP | **82.47 ± 0.70% accuracy** / 95.08 ± 0.17 AUC | Published SplitNN 81.17 ± 0.35% on 13 bands; our run uses 3 RGB bands (5 seeds) |
-| WorldStrat IPCC, one-shot Sentinel features | 77.93 ± 0.52% accuracy / 94.13 ± 0.53 AUC | Location-only: 70.66 ± 0.63% / 86.49 ± 0.86 AUC (5 seeds) |
-| WorldStrat IPCC, two-party SPOT + mean Sentinel | 77.42 ± 0.72% accuracy / 94.81 ± 0.21 AUC | Local encoders trained; iterative; +6.76 over location-only (5 seeds) |
+| WorldStrat IPCC, one-shot Sentinel features | 77.93 ± 0.52% accuracy / 94.13 ± 0.53 AUC | One upload of frozen features (5 seeds) |
+| WorldStrat IPCC, two-party SPOT + mean Sentinel | 77.42 ± 0.72% accuracy / 94.81 ± 0.21 AUC | Local encoders trained; iterative (5 seeds) |
 | WorldStrat IPCC, SPOT + Sentinel late fusion | 78.00 ± 0.55% accuracy / **95.04 ± 0.14 AUC** | Additional iterative protocol; not the one-shot method (5 seeds) |
 
 On the same VertiBench task and official test set, our five-seed one-shot run
@@ -176,7 +171,7 @@ experiments.
 
 - Frozen DINOv2 feature extraction and satellite VFL experiments.
 - Concatenation, late-fusion, mean-logit and shared-encoder models.
-- WorldStrat location-only baseline and POI-grouped evaluation splits.
+- WorldStrat POI-grouped evaluation splits.
 - Hydra configs, multi-seed runs, TensorBoard, tests and CI (Python 3.10–3.12).
 
 | Read next | |

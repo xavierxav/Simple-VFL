@@ -63,9 +63,8 @@ SATELLITE_EXCLUDED_POIS = ["ASMSpotter-1-1-1", "Landcover-1062091", "UNHCR-HUNs0
 def load_satellite_metadata(data_root: str, label_type: str) -> pd.DataFrame:
     """Build the one-row-per-POI frame used by every satellite experiment.
 
-    Keeping this in one place guarantees that the location-only baseline in
-    ``scripts/location_baseline.py`` uses the same POIs and labels as the
-    image models.
+    Keeping this in one place guarantees that every experiment uses the same
+    POIs and labels.
     """
     csv_file = os.path.join(data_root, "satellite_dataset", "metadata.csv")
     # The public WorldStrat metadata.csv (Zenodo) is comma-separated, while
@@ -74,7 +73,7 @@ def load_satellite_metadata(data_root: str, label_type: str) -> pd.DataFrame:
     df = df.rename(columns={df.columns[0]: "POI"})
     df = df.loc[~df["POI"].isin(SATELLITE_EXCLUDED_POIS)]
 
-    columns = ["POI", "IPCC Class"] + [column for column in ("lon", "lat") if column in df.columns]
+    columns = ["POI", "IPCC Class"]
     metadata = df[columns].drop_duplicates().reset_index(drop=True)
 
     label_mappings = LabelMappings(label_type)

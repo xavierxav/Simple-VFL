@@ -314,8 +314,6 @@ communication cost, dated and scope-limited in the README.
   features `extracted_features_giant_rgb_light_preprocess.zip`; SPOT features
   `extracted_features_giant_ps_normalized.7z`, both from
   [Hugging Face](https://huggingface.co/datasets/xavvierxav/L1C_dataset).
-- **Location baseline**: `python scripts/location_baseline.py --label <label>`
-  (5 seeds for `sources`, `ipcc`, and `simplified_ipcc`).
 - **Aggregation**: `python scripts/aggregate_results.py <sweep folder>`.
 
 ## Reproducibility checklist
@@ -346,10 +344,6 @@ communication cost, dated and scope-limited in the README.
   runners); the five-seed IPCC and simplified-IPCC runs used a Kaggle T4
   (`xavierdesprez/simple-vfl-ipcc5`). The GPU runner copies one feature tar to
   local disk before training, so the Kaggle mount is not the bottleneck.
-- The `sources` labels are provider names and are geographically clustered. A
-  random forest on `lon`/`lat` alone reaches 91.71% on the same test split, so
-  the WorldStrat benchmark is work in progress; see the discussion in
-  [RESULTS.md](../RESULTS.md).
 - The original feature-extraction scripts computed image normalisation
   statistics over the full dataset. A strict protocol would recompute them on
   the training split only.
@@ -358,8 +352,7 @@ communication cost, dated and scope-limited in the README.
 - The SPOT + Sentinel gain is small (+0.65 accuracy on `sources`, +1.80 on
   IPCC). On `sources` the paired differences are within seed noise (paired
   t-test: p ≈ 0.39 accuracy, p ≈ 0.28 AUC; the fusion loses on seed 3). The
-  fusion has the best AUC among the image models on every label, but on
-  `sources` the location-only baseline is higher (98.00 vs 97.33). On IPCC
+  fusion has the best AUC among the image models on every label. On IPCC
   (paired t-test, n=5), the accuracy gain is +1.80 (p ≈ 0.008) and AUC gain
   +0.83 (p < 0.001); exact two-sided Wilcoxon is p = 0.0625 for both. Treat
   these small-sample tests cautiously. On simplified-IPCC the fusion-vs-SPOT

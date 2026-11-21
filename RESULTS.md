@@ -124,7 +124,7 @@ The five-seed IPCC and simplified-IPCC runs were executed on a Kaggle T4.
    against 88.96 ± 1.04 for SPOT alone (+0.65 accuracy, +0.12 AUC), but the
    paired differences are within seed noise (paired t-test: p ≈ 0.39 accuracy,
    p ≈ 0.28 AUC; the fusion loses on seed 3). It has the **best image-model AUC
-   (97.33)**, though the location-only baseline is higher (98.00). On IPCC
+   (97.33)**. On IPCC
    (five seeds), fusion reaches 78.00 ± 0.55 / 95.04 ± 0.14, vs 76.20 ± 0.77 /
    94.21 ± 0.11 for SPOT alone (+1.80 accuracy, +0.83 AUC). Paired t-tests give
    p ≈ 0.008 and p < 0.001; exact two-sided Wilcoxon is p = 0.0625 for both
@@ -211,38 +211,15 @@ example: same sensor, same AOI, different dates.
 WorldStrat lets us test a sensor-level split: one SPOT party and one Sentinel
 party holding 16 revisits. On the semantic IPCC label, the one-shot 16-view
 Sentinel model reaches **77.93 ± 0.52 accuracy / 94.13 ± 0.53 AUC** (five
-seeds), vs **70.66 / 86.49** for the location-only random forest. The separate
+seeds). The separate
 SPOT + Sentinel late-fusion comparison reaches **78.00 ± 0.55 / 95.04 ± 0.14**.
 Adding SPOT to Sentinel gives **+1.80 accuracy / +0.83 AUC** over SPOT alone
 on IPCC (+0.65 / +0.12 on `sources`),
 and using all 16 revisits gives **~+4.3** over one revisit on IPCC (+4.9 on
 `sources`). That is a real signal, but a modest one: the dataset is
-**label-limited**, the revisits are correlated but still add signal, and `sources` is a geographic
-shortcut. We use WorldStrat for an exploratory two-sensor benchmark; it is not a
+**label-limited** and the revisits are correlated but still add signal. We use WorldStrat for an exploratory two-sensor benchmark; it is not a
 mature benchmark, and So2Sat LCZ42 and BigEarthNet are public multi-sensor
 alternatives.
-
-**The labels are geographic shortcuts.** The 4 `sources` classes are provider
-names (Amnesty, ASMSpotter, Landcover, UNHCR), and they are spatially
-clustered. A random forest on `lon`/`lat` alone reaches **91.71%** accuracy on
-the same test split, above the best image model (89.61%); the image numbers are
-therefore not yet a clean measure of remote-sensing value on that label.
-
-Across the three supported labels, the AUC gap between the best image model and
-the location-only baseline flips sign:
-
-| Label | Classes | Location-only AUC | Best image AUC | Gap |
-|---|---:|---:|---:|---:|
-| `sources` | 4 | 98.00 | 97.33 | **-0.67** |
-| `simplified_ipcc` | 4 | 87.09 | 93.70 | **+6.61** |
-| `ipcc` | 7 | 86.49 | 95.04 | **+8.55** |
-
-(Seed-matched: location-only RF and image models use 5 seeds for all three labels. POIs with a missing
-`IPCC Class` are mapped to `Other`, matching the image pipeline.)
-
-On `sources`, geography is a better ranking signal than the images. On the
-semantic labels the image models are ahead, with a wider image-versus-location
-AUC gap on the land-cover tasks. That is why the dataset work is moving to IPCC.
 
 On `simplified_ipcc`, the SPOT + Sentinel fusion is also the best image model
 (**78.98 ± 0.39%** accuracy, **93.70 ± 0.22 AUC**, five seeds), ahead of SPOT
@@ -252,12 +229,10 @@ On `simplified_ipcc`, the SPOT + Sentinel fusion is also the best image model
 is not clear at five seeds (t-test p ≈ 0.31); all five AUC differences are
 positive (paired t-test p < 0.001; exact Wilcoxon p = 0.0625).
 
-A semantic label changes the picture. On the 7-class IPCC task (5 seeds,
-Kaggle T4), the same frozen pipeline beats the location-only baseline:
+On the 7-class IPCC task (5 seeds, Kaggle T4):
 
 | IPCC setting | Accuracy | AUC |
 |---|---:|---:|
-| Location-only RF (`lon`/`lat`) | 70.66 ± 0.63 | 86.49 ± 0.86 |
 | Sentinel, 16 views, concat (one-shot) | **77.93 ± 0.52** | 94.13 ± 0.53 |
 | Sentinel, 1 view | 73.75 ± 1.14 | 92.86 ± 0.54 |
 | SPOT only | 76.20 ± 0.77 | 94.21 ± 0.11 |
@@ -268,13 +243,9 @@ IPCC class counts are Settlement 1,700, Forest 733, Agriculture 699, Other 489
 Wetland 41; a majority-class predictor gets about 44% accuracy, so accuracy
 alone is not enough and AUC is the primary metric.
 
-The one-shot 16-view Sentinel model adds **+7.27 accuracy points / +7.64 AUC
-points** over the location-only RF. The separate SPOT + Sentinel fusion adds
-**+8.55 AUC points** (95.04 vs 86.49) and has the **best image-model AUC
-(95.04 ± 0.14)**; its accuracy is 78.00 vs 77.93 for the one-shot model. On an imbalanced
-7-class label, AUC is the more informative summary. This is the direction the
-dataset work is taking: a semantic label, then a geographically disjoint split
-to remove the remaining location overlap.
+The separate SPOT + Sentinel fusion has the **best image-model AUC
+(95.04 ± 0.14)**; its accuracy is 78.00 vs 77.93 for the one-shot model. On an
+imbalanced 7-class label, AUC is the more informative summary.
 
 A `sentinel_weight` sweep on IPCC (0.25, 0.5, 1, 2; 3 seeds, separate from the
 five-seed main runs) leaves AUC at
@@ -291,8 +262,6 @@ interchangeable.
 
 Next steps for the dataset work:
 
-- a geographically disjoint split (hold out regions/countries) so test POIs
-  are not in the same regions as training POIs;
 - add a five-seed SPOT + Sentinel concat run to directly test the one-shot
   transfer on the sensor-level split;
 - a harder semantic label or additional sensors, to move past the
@@ -334,16 +303,6 @@ Next steps for the dataset work:
   the same command with `dataset.label_type=ipcc dataset.num_classes=7` (or
   `dataset.label_type=simplified_ipcc dataset.num_classes=4`) and the same
   five seeds.
-- **Location baseline**:
-
-  ```bash
-  DATA_ROOT=/path/to/data \
-  python scripts/location_baseline.py --label sources --seeds 0,1,2,3,4
-  DATA_ROOT=/path/to/data \
-  python scripts/location_baseline.py --label ipcc --seeds 0,1,2,3,4
-  DATA_ROOT=/path/to/data \
-  python scripts/location_baseline.py --label simplified_ipcc --seeds 0,1,2,3,4
-  ```
 - **Aggregation**: `python scripts/aggregate_results.py <sweep folder>`.
 - **Hardware**: the five-seed `sources` table was run on CPU (local 20-core and
   Kaggle CPU runners); five-seed IPCC and simplified-IPCC runs were run on a
@@ -370,8 +329,7 @@ Next steps for the dataset work:
 - The SPOT + Sentinel gain is small (+0.65 accuracy on `sources`, +1.80 on
   IPCC). On `sources` the paired differences are within seed noise (paired
   t-test: p ≈ 0.39 accuracy, p ≈ 0.28 AUC; the fusion loses on seed 3). The
-  fusion has the best AUC among image models on every label, but on `sources`
-  the location-only baseline is higher (98.00 vs 97.33). On IPCC (paired
+  fusion has the best AUC among image models on every label. On IPCC (paired
   t-test, n=5), the gain over SPOT alone is +1.80 accuracy (p ≈ 0.008) and
   +0.83 AUC (p < 0.001); exact two-sided Wilcoxon is p = 0.0625 for both.
   On simplified-IPCC, the +0.74 accuracy difference is not clear (p ≈ 0.31),

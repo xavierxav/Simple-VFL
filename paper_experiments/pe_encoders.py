@@ -3,7 +3,7 @@
 encoder(name) -> (fn, dim): fn takes a float tensor [B,3,H,W] in [0,1] on DEV (H, W multiples of the patch size;
 non-square inputs are allowed, the position embeddings are interpolated) and returns pooled features [B,dim].
 Each model sees its own pre-training normalisation.  Satellite data (VertiBench) keep their own per-band
-standardisation (s7_vertibench_geo.prep).
+standardisation (s7_vb_encoders.prep).
 """
 
 import torch
