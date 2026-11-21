@@ -74,12 +74,40 @@ Ec = load("vb224_controls_clip_l14.json") or {}
 Eold = load("vb_controls.json") or {}
 pool = load("vb224_pooling.json")
 inv = load("vb224_inversion.json")
+inv1 = inv or {}  # first attacker (15 epochs, Adam): kept as a third attacker, it generalises better on some formats
+INV_NPZ = {}
+_v2, _v2b = load("vb224_inversion_v2.json"), load("vb224_inversion_v2b.json")
+if _v2:  # revised attacker (second review): shared deconvolutional decoder + linear decoder, per-location re-identification.
+    # Per-party PCA bases differ between parties: the v2 rows that decoded them with a shared decoder are dropped and
+    # replaced by the v2b re-run (per-party alignment / per-party linear map).
+    for _part in ("single", "ridge"):
+        for _k in list(_v2.get(_part, {})):
+            if _k.startswith("PCA"):
+                del _v2[_part][_k]
+        for _k, _v in ((_v2b or {}).get(_part) or {}).items():
+            _v2.setdefault(_part, {})[_k] = _v
+    inv = _v2
+    for _f, _pca in (("vb224_inversion_v2_examples.npz", False), ("vb224_inversion_v2b_examples.npz", True)):
+        if os.path.exists(os.path.join(RES, _f)):
+            _z = np.load(os.path.join(RES, _f))
+            INV_NPZ.update({k: _z[k] for k in _z.files if ("PCA" in k) == _pca or k in ("original", "nearest_neighbour")})
+elif os.path.exists(os.path.join(RES, "vb224_inversion_examples.npz")):
+    _z = np.load(os.path.join(RES, "vb224_inversion_examples.npz"))
+    INV_NPZ = {k: _z[k] for k in _z.files}
 he = {}
 for _f in sorted(os.listdir(RES)) if os.path.isdir(RES) else []:
     if _f.startswith("he_heads") and _f.endswith(".json"):
         _d = load(_f)
         he.setdefault("he_cost", {}).update(_d.pop("he_cost", {}))
-        he.update(_d)
+        for _k, _v in _d.items():  # deep merge: the he_heads_r_* re-runs only add heads (ridge_sel) to existing tasks
+            if isinstance(_v, dict) and isinstance(he.get(_k), dict):
+                for _c, _h in _v.items():
+                    if isinstance(_h, dict) and isinstance(he[_k].get(_c), dict):
+                        he[_k][_c].update(_h)
+                    elif _h or _c not in he[_k]:
+                        he[_k][_c] = _h
+            else:
+                he[_k] = _v
 milk = load("milk_heads.json")
 msplit = load("milk_split.json") or {}
 cls = load("classic.json") or {}
@@ -319,7 +347,27 @@ if mr:
             b = mr[e].get("concat" + (f"|{fr}" if fr else ""))
             cells.append(f"{a['f1'] - b['f1']:+.1f}" if a and b else "--")
         rows.append(f"late $-$ concat, {lab} of the training folds & " + " & ".join(cells) + " \\\\")
+    rows.append("\\midrule")
+    for sel, lab, ck in (("wloss", "stopping on the class-weighted val.\\ loss", "concat|stop wloss"), ("f1", "stopping on the val.\\ macro F1", "concat|stop f1"),
+                         ("f1", "\\quad the same, concat with weight decay $10^{-3}$", "concat + weight decay 1e-3|stop f1")):
+        cells = []
+        for e in EN:
+            a, b = mr[e].get(f"late fusion (fixed 0.5)|stop {sel}"), mr[e].get(ck)
+            cells.append(f"{a['f1'] - b['f1']:+.1f}" if a and b else "--")
+        rows.append(f"{'late $-$ concat, ' if 'quad' not in lab else ''}{lab} & " + " & ".join(cells) + " \\\\")
     write("tab_milkreg.tex", "\n".join(rows))
+    # same early-stopping rule for both heads, over the four encoders that were re-run (s19 PE_REG_EXTRA)
+    E4 = [e for e in ("dinov2_g", "clip_l14", "dinov2_b", "clip_b16") if "concat|stop f1" in mr.get(e, {})]
+    gs = [mr[e][f"late fusion (fixed 0.5)|stop {sel}"]["f1"] - mr[e][f"concat|stop {sel}"]["f1"] for e in E4 for sel in ("wloss", "f1")]
+    gw = [mr[e]["late fusion (fixed 0.5)|stop f1"]["f1"] - mr[e]["concat + weight decay 1e-3|stop f1"]["f1"] for e in E4]
+    if gs:
+        macro("mrStopMin", f1(min(gs)))
+        macro("mrStopMax", f1(max(gs)))
+        macro("mrStopN", str(len(gs)))
+        macro("mrWdMin", f1(min(gw)))
+        macro("mrWdMax", f1(max(gw)))
+        dw = [mr[e][f"{h}|stop wloss"]["f1"] - mr[e][h]["f1"] for e in E4 for h in ("concat", "late fusion (fixed 0.5)")]
+        macro("mrWlossDropMax", f1(-min(dw)))
     for e, t in (("dinov2_g", "G"), ("clip_l14", "C"), ("monet", "M")):
         r = mr.get(e, {})
         for k, tag in (("concat", "Cat"), ("concat + input dropout 0.5", "Drop"), ("concat + feature mixup 0.4", "Mix"), ("concat + feature noise 0.5", "Noise"),
@@ -372,12 +420,22 @@ if msplit or milk:
             tm = f"{ct / 62832 * 10480 / 60:.1f}" if ct else "--"
             rows.append(f"{lab} & one-shot & {hp:.1f}\\,M & {size(2 * d * 2)} & {tm} & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
             macro(f"fz{k.replace('_', '').replace('16', 'Sixteen').replace('14', 'Fourteen')}", f1(s["f1"]))
-    mrg = (load("milk_reg.json") or {}).get("dinov2_g", {}).get("late fusion (fixed 0.5)|views mean")
-    if mrg:
-        hp2 = 2 * (1536 * 1000 + 1000 + 2 * 1000 + 1000 * 7 + 7) / 1e6
-        ct = cost.get("dinov2_g_224", {}).get("extract_secs_all_images")
+    rows.append("\\midrule")
+    for k, lab, d in (("dinov2_b", "DINOv2-B", 768), ("clip_b16", "CLIP-B", 768), ("dinov2_g", "DINOv2-g", 1536)):
+        mrg = (load("milk_reg.json") or {}).get(k, {}).get("late fusion (fixed 0.5)|views mean")
+        if not mrg:
+            continue
+        hp2 = 2 * (d * 1000 + 1000 + 2 * 1000 + 1000 * 7 + 7) / 1e6  # one MLP head per party
+        ct = cost.get(k + "_224", {}).get("extract_secs_all_images")
         tm = f"{8 * ct / 62832 * 10480 / 60:.1f}" if ct else "--"
-        rows.append(f"DINOv2-g, frozen, late fusion, 8 views & one-shot & {hp2:.1f}\\,M & {size(2 * 1536 * 2)} & {tm} & {pm(mrg, 'f1')} & {pm(mrg, 'bacc')} & {pm(mrg)} \\\\")
+        rows.append(f"{lab}, frozen, 8 views, late fusion & one-shot & {hp2:.1f}\\,M & {size(2 * d * 2)} & {tm} & {pm(mrg, 'f1')} & {pm(mrg, 'bacc')} & {pm(mrg)} \\\\")
+        lo = msplit.get(k + "_lora")
+        fr = (milk or {}).get(k, {}).get("clin+derm|mlp2|bal")
+        if lo and fr:
+            t = {"dinov2_b": "B", "clip_b16": "Cb"}[k]
+            macro(f"fzGap{t}", f1(lo["f1"] - fr["f1"]))
+            macro(f"fzGapViews{t}", f1(lo["f1"] - mrg["f1"]))
+            macro(f"fzViews{t}", f1(mrg["f1"]))
     write("tab_freeze.tex", "\n".join(rows))
 
 # ------------------------------------------------------------------ WorldStrat: sensors, labels, resolution
@@ -633,22 +691,36 @@ if inv and "single" in inv:
     rows = []
     order = ["full, 16-bit", "full, 8-bit", "full, 4-bit", "full, 1-bit", "PCA-256", "PCA-64", "PCA-16", "PCA-64, 4-bit", "PCA-16, 4-bit", "DP eps=64", "DP eps=8", "CLIP-L, full, 16-bit"]
     pretty = {"noise rho=1": "noise $\\rho=1$", "noise rho=3": "noise $\\rho=3$", "DP eps=64": "clip + noise, $\\varepsilon=64$", "DP eps=8": "clip + noise, $\\varepsilon=8$"}
+    V2INV = "ridge" in inv
     for name in order:
         r = inv["single"].get(name)
         if not r:
             continue
         a = accmap.get(name)
-        j = inv.get("joint", {}).get(name)
-        ps = f"{r['psnr']:.1f}" + (f"\\,{{\\scriptsize$\\pm${np.std(r['psnr_seeds'], ddof=1):.1f}}}" if len(r.get("psnr_seeds", [])) > 1 else "")
-        rows.append(f"{pretty.get(name, name)} & {a[1] if a else '--'} & {pm(a[0]) if a else '--'} & {ps} & {r['ssim']:.2f} & {r['reid']['top1']:.1f} \\\\")
+        if V2INV:  # strongest of the two attackers for each metric; L marks the linear decoder
+            cand = [(r, ""), (inv["ridge"].get(name), "$^{\\ell}$"), (inv1.get("single", {}).get(name), "$^{s}$")]
+            cand = [(x, m) for x, m in cand if x]
+
+            def best(f):
+                return max(((f(x), m) for x, m in cand if f(x) is not None), key=lambda t: t[0])
+            (bp, lp), (bs, ls), (bi, li), (bl, ll) = (best(lambda x: x["psnr"]), best(lambda x: x["ssim"]), best(lambda x: x["reid"]["top1"]),
+                                                      best(lambda x: x.get("reid_loc", {}).get("top1")))
+            rows.append(f"{pretty.get(name, name)} & {a[1] if a else '--'} & {pm(a[0]) if a else '--'} & {bp:.1f}{lp} & {bs:.2f}{ls} & {bi:.2f}{li} & {bl:.1f}{ll} \\\\")
+        else:
+            ps = f"{r['psnr']:.1f}" + (f"\\,{{\\scriptsize$\\pm${np.std(r['psnr_seeds'], ddof=1):.1f}}}" if len(r.get("psnr_seeds", [])) > 1 else "")
+            rows.append(f"{pretty.get(name, name)} & {a[1] if a else '--'} & {pm(a[0]) if a else '--'} & {ps} & {r['ssim']:.2f} & {r['reid']['top1']:.1f} \\\\")
         if name in ("PCA-16", "DP eps=8", "PCA-16, 4-bit", "full, 1-bit"):
             rows.append("\\midrule")
     rows.append("\\midrule")
-    rows.append(f"\\emph{{reference:}} mean training image & -- & -- & {inv['mean_image']['psnr']:.1f} & {inv['mean_image']['ssim']:.2f} & 0.0 \\\\")
+    X = " & --" if V2INV else ""
+    rows.append(f"\\emph{{reference:}} mean training image & -- & -- & {inv['mean_image']['psnr']:.1f} & {inv['mean_image']['ssim']:.2f} & 0.0{X} \\\\")
     if "mean_colour_oracle" in inv:
         mo = inv["mean_colour_oracle"]
-        rows.append(f"\\emph{{reference:}} each image's mean colour & -- & -- & {mo['psnr']:.1f} & {mo['ssim']:.2f} & {mo['reid']['top1']:.1f} \\\\")
-    rows.append(f"\\emph{{reference:}} nearest training image & -- & -- & {inv['nearest_neighbour']['psnr']:.1f} & {inv['nearest_neighbour']['ssim']:.2f} & -- \\\\")
+        rl = f" & {mo['reid_loc']['top1']:.1f}" if V2INV else ""
+        rows.append(f"\\emph{{reference:}} each image's mean colour & -- & -- & {mo['psnr']:.1f} & {mo['ssim']:.2f} & {mo['reid']['top1']:.{2 if V2INV else 1}f}{rl} \\\\")
+    rows.append(f"\\emph{{reference:}} nearest training image & -- & -- & {inv['nearest_neighbour']['psnr']:.1f} & {inv['nearest_neighbour']['ssim']:.2f} & --{X} \\\\")
+    if V2INV:
+        rows.append(f"\\emph{{chance}} & -- & -- & -- & -- & {100 / inv['n_test_images']:.2f} & {100 * 16 / inv['n_test_images']:.1f} \\\\")
     rows = [r for i, r in enumerate(rows) if not (r == "\\midrule" and i + 1 < len(rows) and rows[i + 1] == "\\midrule")]
     write("tab_privacy.tex", "\n".join(rows))
     for name, tag in (("full, 16-bit", "Full"), ("PCA-64", "PCAsf"), ("PCA-16", "PCAst"), ("PCA-256", "PCAtf"), ("DP eps=8", "DPeight"), ("DP eps=64", "DPsf"),
@@ -656,7 +728,23 @@ if inv and "single" in inv:
         r = inv["single"].get(name)
         if r:
             macro(f"inv{tag}", f1(r["psnr"]))
-            macro(f"inv{tag}Reid", f1(r["reid"]["top1"]))
+            macro(f"inv{tag}Reid", f"{r['reid']['top1']:.{2 if 'reid_loc' in r else 1}f}")
+            if "reid_loc" in r:
+                macro(f"inv{tag}ReidLoc", f1(r["reid_loc"]["top1"]))
+                macro(f"inv{tag}ReidLocTen", f1(r["reid_loc"]["top10"]))
+                macro(f"inv{tag}TrainMse", f"{r['train_loss_last_epoch']:.4f}")
+        q = inv.get("ridge", {}).get(name)
+        if q:
+            macro(f"invLin{tag}", f1(q["psnr"]))
+            macro(f"invLin{tag}ReidLoc", f1(q["reid_loc"]["top1"]))
+        o = inv1.get("single", {}).get(name)
+        if r and q:  # best over the attackers, as in the table
+            al = [x for x in (r, q, o) if x]
+            macro(f"invBest{tag}", f1(max(x["psnr"] for x in al)))
+            macro(f"invBest{tag}ReidLoc", f1(max(x["reid_loc"]["top1"] for x in al if "reid_loc" in x)))
+            if o and name == "full, 16-bit":
+                macro("invGainLong", f1(r["psnr"] - o["psnr"]))
+                macro("invShortEpochs", str(inv1.get("epochs", 15)))
         j = inv.get("joint", {}).get(name)
         if j:
             macro(f"inv{tag}Joint", f1(j["psnr"]))
@@ -664,19 +752,27 @@ if inv and "single" in inv:
     macro("invMean", f1(inv["mean_image"]["psnr"]))
     macro("invNN", f1(inv["nearest_neighbour"]["psnr"]))
     if "mean_colour_oracle" in inv:
-        macro("invColour", f1(inv["mean_colour_oracle"]["psnr"]))
-        macro("invColourReid", f1(inv["mean_colour_oracle"]["reid"]["top1"]))
+        mo = inv["mean_colour_oracle"]
+        macro("invColour", f1(mo["psnr"]))
+        macro("invColourReid", f1(mo["reid"]["top1"]))
+        if "reid_loc" in mo:
+            macro("invColourReidLoc", f1(mo["reid_loc"]["top1"]))
+            macro("invColourReidLocTen", f1(mo["reid_loc"]["top10"]))
+            macro("invColourTrainMse", f"{mo['train_mse']:.4f}")
+            macro("invNLoc", f"{mo['reid_loc']['n_locations']:,}".replace(",", "{,}"))
+            macro("invChanceLoc", f"{100 / mo['reid_loc']['n_locations']:.2f}")
+            macro("invChanceLocTen", f"{1000 / mo['reid_loc']['n_locations']:.1f}")
+            macro("invEpochs", str(inv["epochs"]))
 if isinstance(e4, list):
     for r in e4:
         tag = {D: "Full", 64: "Sf", 16: "St"}[r["d"]] + {None: "None", 64: "Ssf", 8: "Eight", 1: "One"}[r["eps_upload"]]
         macro(f"dp{tag}", f1(r["acc"]))
-npz = os.path.join(RES, "vb224_inversion_examples.npz")
-if os.path.exists(npz) and inv:
-    z = np.load(npz)
+if INV_NPZ and inv:
+    z = INV_NPZ
     cols = [("original", "original"), ("mean colour", None), ("nearest_neighbour", "nearest\ntraining image"), ("single__full_16-bit", "single upload,\nfull"),
             ("single__PCA-64", "single upload,\nPCA-64"), ("single__DP_eps8", "single upload,\nclip+noise $\\varepsilon$=8"),
             ("single__CLIP-L_full_16-bit", "single upload,\nCLIP-L")]
-    cols = [(k, t) for k, t in cols if k == "mean colour" or k in z.files]
+    cols = [(k, t) for k, t in cols if k == "mean colour" or k in z]
     ex = [0, 1, 2, 3]
     GAIN = 3.0
     fig, axs = plt.subplots(len(ex), len(cols), figsize=(6.6, 0.95 * len(ex) + 0.35))
@@ -699,6 +795,12 @@ HEDS = [("vertibench/dinov2_g_224", "VertiBench, DINOv2-g", 16), ("vertibench/cl
         ("worldstrat_ipcc_1.5m_S2MS", "WorldStrat IPCC, DINOv2-g", 2), ("cifar10_dinov2_g_topbottom", "CIFAR-10 halves, DINOv2-g", 2),
         ("cifar100_dinov2_g_topbottom", "CIFAR-100 halves, DINOv2-g", 2)]
 rows = []
+# ridge with the party scaling (per coordinate or per block) chosen on validation, against the per-coordinate ridge of the table
+_sd = [abs(c["ridge_sel"][he[t].get("metric", "acc")] - c["ridge"][he[t].get("metric", "acc")])
+       for t in he if t != "he_cost" and isinstance(he[t], dict) for c in he[t].values() if isinstance(c, dict) and "ridge_sel" in c and "ridge" in c]
+if _sd:
+    macro("heSelMax", f1(max(_sd)))
+    macro("heSelN", str(len(_sd)))
 for key, lab, k in HEDS:
     r = he.get(key)
     if not r:
