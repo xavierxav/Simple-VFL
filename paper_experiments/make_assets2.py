@@ -354,9 +354,11 @@ if msplit or milk:
             s = msplit.get(k)
             if not s:
                 continue
-            rows.append(f"{lab} & split, {s['epochs']} ep. & {s['trainable_params'] / 1e6:.1f}\\,M & {size(s['bytes_per_train_sample'])} & {np.mean(s['secs_per_fold']) / 60:.1f} & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
+            E = s["epochs"]  # training passes only (activations up, gradients down), as in Table 1: 3,144 training,
+            up = s["bytes_per_train_sample"] * 2 * E * 3144 / (2 * E * 3144 + E * 1048 + 1048)  # 1,048 val. and test lesions
+            rows.append(f"{lab} & split, {s['epochs']} ep. & {s['trainable_params'] / 1e6:.1f}\\,M & {size(up)} & {np.mean(s['secs_per_fold']) / 60:.1f} & {pm(s, 'f1')} & {pm(s, 'bacc')} & {pm(s)} \\\\")
             macro(f"fzMin{k}", f"{np.mean(s['secs_per_fold']) / 60:.1f}")
-            macro(f"fzUp{k}", size(s["bytes_per_train_sample"]))
+            macro(f"fzUp{k}", size(up))
             macro(f"fz{k.replace('_', '').replace('18', 'Eighteen').replace('16', 'Sixteen')}", f1(s["f1"]))
         else:
             s = (milk or {}).get(k, {}).get("clin+derm|mlp2|bal")
@@ -425,7 +427,8 @@ if ws:
     for t, tt in (("ipcc", "Ipcc"), ("smod", "Smod"), ("lccs", "Lccs")):
         r = ws.get(t, {})
         for c, tc in (("SPOT 1.5m", "Spot"), ("SPOT 10m", "SpotTen"), ("S2 RGB", "Srgb"), ("S2 MS", "Sms"), ("SPOT 1.5m + S2 MS", "Fus"), ("SPOT 1.5m + S2 RGB", "FusRgb"),
-                       ("SPOT 10m + S2 MS", "FusTen"), ("SPOT 6m + S2 MS", "FusSix"), ("SPOT 6m", "SpotSix"), ("S2 SSL4EO", "Sssl")):
+                       ("SPOT 10m + S2 MS", "FusTen"), ("SPOT 6m + S2 MS", "FusSix"), ("SPOT 6m", "SpotSix"), ("S2 SSL4EO", "Sssl"),
+                       ("SPOT 3m", "SpotThree"), ("SPOT 3m + S2 MS", "FusThree")):
             s = r.get(c + "|mlp2")
             if s:
                 macro(f"ws{tt}{tc}", f1(s["f1"]))
@@ -447,7 +450,8 @@ if wf:
           ("SPOT full+centre|mlp2", "SPOT, full area and centre 336\\,m", "--"), None,
           ("S2 mean|mlp2", "S2, mean of revisits", "1"), ("S2 mean+std|mlp2", "S2, mean and temporal std", "2"),
           ("S2 set16|set attn", "S2, 16 revisits, shared-weight set head", "16"), None,
-          ("SPOT + S2 mean|concat", "concat MLP, S2 mean", "1"), ("SPOT + S2 mean+std|concat", "concat MLP, S2 mean and std", "2"),
+          ("SPOT + S2 mean|concat", "concat MLP, S2 mean", "1"), ("SPOT + S2 mean|late fusion", "S2 mean, late fusion", "1"),
+          ("SPOT + S2 mean+std|concat", "concat MLP, S2 mean and std", "2"),
           ("SPOT + S2 clear-mean|concat", "concat MLP, S2 mean of 8 clearest (C)", "1"), ("SPOT + S2 clear-mean|pca256 concat", "C, PCA-256 per party", "1"),
           ("SPOT + S2 clear-mean|late fusion", "C, late fusion", "1"), ("SPOT + S2 clear-mean|branch aux md0.3", "C, branches, aux.\\ losses, modality dropout", "1"),
           ("SPOT + S2 set16|set attn", "S2 by shared-weight set head (16 revisits)", "16"), None,
@@ -486,7 +490,10 @@ if wf:
                               "StdFus": ("SPOT + S2 mean+std|concat", "S2 mean+std|mlp2"), "Centre": ("SPOT|mlp2", "SPOT centre|mlp2"),
                               "FC": ("SPOT full+centre|mlp2", "SPOT|mlp2"), "Tiles": ("SPOT tiles mean|mlp2", "SPOT|mlp2"),
                               "Pca": ("SPOT + S2 clear-mean|pca256 concat", "SPOT + S2 clear-mean|concat"),
-                              "Branch": ("SPOT + S2 clear-mean|branch aux md0.3", "SPOT + S2 clear-mean|concat")}.items():
+                              "Branch": ("SPOT + S2 clear-mean|branch aux md0.3", "SPOT + S2 clear-mean|concat"),
+                              "LateMean": ("SPOT + S2 mean|late fusion", "SPOT + S2 mean|concat"),
+                              "PcaMean": ("SPOT + S2 clear-mean|pca256 concat", "SPOT + S2 mean|concat"),
+                              "TilesFus": ("SPOT tiles mean + S2 clear-mean|concat", "SPOT tiles mean|mlp2")}.items():
             if ka in r and kb in r:
                 x = np.array(r[ka]["f1s"]) - np.array(r[kb]["f1s"])
                 macro(f"wp{tt.capitalize()}{tag}", ("+" if x.mean() >= 0 else "$-$") + f"{abs(x.mean()):.1f}")
@@ -723,10 +730,16 @@ for key, tag in (("milk10k/dinov2_g/pca64", "Milk"), ("vertibench/dinov2_g_224/p
         macro(f"hc{tag}Expand", f"{c['upload_bytes_per_party'] / c['plain_fp16_bytes_per_party']:.0f}")
         macro(f"hc{tag}Agg", size(c["aggregate_bytes_round_trip"]))
         macro(f"hc{tag}N", f"{c['N']:,}".replace(",", "{,}"))
-        if tag == "Milk":  # the full-dimensional ridge (1,536 features per party), extrapolated from the same timings
-            nf = c["parties"] * (c["parties"] - 1) // 2 * 1536**2
-            macro("hcMilkFullH", f"{(nf * c['secs_ctct_inner_product'] + 2 * 1536 * c['C'] * c['secs_ptct_inner_product']) / 3600:.0f}")
-            macro("hcMilkFullUp", size(1536 * c["chunks"] * c["ciphertext_bytes"]))
+        if tag == "Milk":  # class-weighted ridge: every party also computes its own weighted Gram block, X_k^T diag(Enc w) X_k,
+            # with d(d+1)/2 ciphertext-plaintext inner products, and uploads its weighted columns too (twice the upload)
+            K, d0, tp, tc = c["parties"], c["d_per_party"], c["secs_ptct_inner_product"], c["secs_ctct_inner_product"]
+            macro("hcMilkServer", f"{(c['extrapolated_secs_server'] + K * d0 * (d0 + 1) / 2 * tp) / 60:.0f}")
+            macro("hcMilkUp", size(2 * c["upload_bytes_per_party"]))
+            nf = K * (K - 1) // 2 * 1536**2
+            unw = nf * tc + K * 1536 * c["C"] * tp
+            macro("hcMilkFullUnwH", f"{unw / 3600:.0f}")
+            macro("hcMilkFullH", f"{(unw + K * 1536 * 1537 / 2 * tp) / 3600:.0f}")
+            macro("hcMilkFullUp", size(2 * 1536 * c["chunks"] * c["ciphertext_bytes"]))
 
 # ------------------------------------------------------------------ placeholders, so that the paper compiles on partial results
 for t in ("tab_main", "tab_encoders", "tab_combo_enc", "tab_classic", "tab_sun", "tab_milk", "tab_milkfusion", "tab_milkreg", "tab_freeze", "tab_ws", "tab_wsfusion",
