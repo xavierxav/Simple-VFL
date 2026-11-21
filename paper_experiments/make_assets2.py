@@ -917,6 +917,45 @@ if GI_NPZ is not None:
         fig.savefig(os.path.join(OUT, "fig_generic.pdf"))
         plt.close(fig)
 
+# ------------------------------------------------------------------ domain-adapted generic decoder (stage 21)
+gf = load("generic_inversion_ft.json") or {}
+if gf:
+    for key, tag in (("off-the-shelf (256 px)", "VbOff"), ("fine-tuned", "VbFt"), ("fine-tuned, best of 4", "VbBest"), ("nearest public image", "VbNn")):
+        gi_macros(tag, gf.get(key))
+    for key, tag in (("off-the-shelf (256 px)", "Off"), ("fine-tuned", "Ft"), ("fine-tuned, best of 4", "Best")):
+        if "clip_cos" in gf.get(key, {}):
+            macro(f"gift{tag}Clip", f"{gf[key]['clip_cos']:.2f}")
+    if "nearest public image" in gf:
+        macro("giftNnLabMatch", f1(gf["nearest public image"]["label_match"]))
+    ft = gf.get("finetune", {})
+    macro("giftPairs", f"{gf['n_public_images']:,}".replace(",", "{,}"))
+    macro("giftLocs", f"{gf['n_public_images'] // 16:,}".replace(",", "{,}"))
+    macro("giftEncMin", f"{gf['encode_minutes']:.0f}")
+    macro("giftSteps", f"{ft.get('steps', 0):,}".replace(",", "{,}"))
+    macro("giftMinutes", f"{ft.get('minutes', 0):.0f}")
+    macro("giftSize", str(gf["size"]))
+    macro("giftNBest", str(gf["n_best"]))
+    macro("giftGuid", f"{gf['guidance']:g}")
+    macro("giftGuidGrid", ", ".join(f"{float(g):g}" for g in gf.get("guidance_val", {})))
+GF_NPZ = os.path.join(RES, "generic_inversion_ft_examples.npz")
+if os.path.exists(GF_NPZ) and GI_NPZ is not None and "vb__paper_upload" in GI_NPZ.files:
+    zf = np.load(GF_NPZ)
+    rows_ = [("original", zf["original"], True), ("generic\ndecoder", GI_NPZ["vb__paper_upload"], False),
+             (f"fine-tuned,\nbest of {gf.get('n_best', 4)}", zf["fine_tuned_best"], True), ("nearest\npublic image", zf["nearest_public"], True)]
+    ne = min(8, len(zf["original"]))
+    fig, axs = plt.subplots(len(rows_), ne, figsize=(6.6, 0.84 * len(rows_) * 8 / ne * 0.98), squeeze=False)
+    for i, (lab, arr, st) in enumerate(rows_):
+        for j in range(ne):
+            axs[i, j].imshow(disp(arr[j], st))
+            axs[i, j].set_xticks([])
+            axs[i, j].set_yticks([])
+            for sp_ in axs[i, j].spines.values():
+                sp_.set_visible(False)
+        axs[i, 0].set_ylabel(lab, fontsize=6)
+    fig.subplots_adjust(left=0.045, right=0.998, top=0.998, bottom=0.002, wspace=0.03, hspace=0.03)
+    fig.savefig(os.path.join(OUT, "fig_generic_ft.pdf"))
+    plt.close(fig)
+
 # ------------------------------------------------------------------ linear / encryption-friendly heads
 HEDS = [("vertibench/dinov2_g_224", "VertiBench, DINOv2-g", 16), ("vertibench/clip_l14_224", "VertiBench, CLIP-L", 16),
         ("milk10k/dinov2_g", "MILK10k, DINOv2-g", 2), ("milk10k/clip_l14", "MILK10k, CLIP-L", 2),
