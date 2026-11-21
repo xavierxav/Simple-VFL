@@ -1,0 +1,71 @@
+{
+ "gain": 1.6,
+ "size": 256,
+ "n_best": 4,
+ "decoder": "sd2-community/stable-diffusion-2-1-unclip-small",
+ "n_public_images": 47072,
+ "encode_minutes": 10.852982918421427,
+ "mean_colour": {
+  "psnr": 28.20425033569336,
+  "ssim": 0.7001007199287415,
+  "reid_pix": {
+   "top1": 15.000000953674316,
+   "top10": 45.0,
+   "median_rank": 14.0
+  }
+ },
+ "nearest public image": {
+  "psnr": 22.477863311767578,
+  "ssim": 0.5410906076431274,
+  "reid_pix": {
+   "top1": 3.125,
+   "top10": 18.125,
+   "median_rank": 117.0
+  },
+  "reid": {
+   "top1": 15.000000953674316,
+   "top10": 47.5,
+   "median_rank": 14.0,
+   "n_gallery": 785
+  },
+  "cos_to_source": 0.7042135000228882,
+  "labels": {
+   "recon": {
+    "acc": 70.0,
+    "f1": 65.76492181540809
+   },
+   "real": {
+    "acc": 68.75,
+    "f1": 65.03035008469791
+   }
+  },
+  "label_match": 79.375
+ },
+ "off-the-shelf (256 px)": {
+  "psnr": 14.250361442565918,
+  "ssim": 0.17068584263324738,
+  "reid_pix": {
+   "top1": 0.0,
+   "top10": 0.625,
+   "median_rank": 354.0
+  },
+  "reid": {
+   "top1": 0.625,
+   "top10": 3.750000238418579,
+   "median_rank": 215.0,
+   "n_gallery": 785
+  },
+  "cos_to_source": 0.2976847290992737,
+  "labels": {
+   "recon": {
+    "acc": 51.87500000000001,
+    "f1": 19.546794399410466
+   },
+   "real": {
+    "acc": 68.75,
+    "f1": 65.03035008469791
+   }
+  },
+  "clip_cos": 0.6262661218643188
+ }
+}
