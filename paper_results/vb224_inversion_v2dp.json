@@ -26,6 +26,29 @@
    ],
    "secs": 385,
    "shared_decoder": true
+  },
+  "DP eps=8": {
+   "psnr": 19.03141212463379,
+   "ssim": 0.5944496989250183,
+   "train_loss_last": 0.02197643741965294,
+   "train_loss_last_epoch": 0.025296096607596914,
+   "reid": {
+    "top1": 0.01592356711626053,
+    "top10": 0.10350318625569344,
+    "median_rank": 6180.0,
+    "n": 12560
+   },
+   "reid_loc": {
+    "top1": 0.11942675337195396,
+    "top10": 1.1863057501614094,
+    "median_rank": 387.0,
+    "n_locations": 785
+   },
+   "psnr_seeds": [
+    19.03141212463379
+   ],
+   "secs": 383,
+   "shared_decoder": true
   }
  },
  "joint": {},
