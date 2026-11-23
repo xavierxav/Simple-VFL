@@ -1,0 +1,179 @@
+"""Stage 23 (CPU, local) - analysis of the third-review audit results.
+
+Reads, from paper_results/: vb_fingerprints.npz and ws_fingerprints.npz + ws_aoi.csv (stage 22 / chain B1), the kept
+test probabilities of the frozen heads (vb_frozen_probs.npz), of the reproduced VertiBench SplitNN
+(vb_repro_splitresnet_preds_probs.npz) and of CLIP-B split learning (vb_split_clipb_probs.npz), the nearest public
+training location of every test upload (vb_nnpublic.npz), and the out-of-fold WorldStrat probabilities
+(ws_sensors_oof_grouped.npz).  Writes vb_audit_analysis.json:
+  mapping   every VertiBench sample matched to its WorldStrat area by image fingerprints (band means and a 4x4 B4
+            thumbnail of each revisit), with the match margin;
+  sibling   test samples that are tiles of a multi-tile site whose other tiles are in the training set;
+  subsets   accuracy of every kept method on all test samples, on those with a sibling and on the others;
+  paired    exact McNemar test and bootstrap interval of each frozen head against the SplitNN reference
+            (seed-averaged probabilities, same test samples);
+  nnpublic  how often the nearest public training upload is a sibling tile, and the label match without siblings;
+  ws_f1     per-class F1 of the WorldStrat heads from the grouped out-of-fold predictions.
+usage: python s23_audit_analysis.py [paper_results]
+"""
+
+import json
+import os
+import sys
+
+import numpy as np
+import pandas as pd
+from scipy.stats import binomtest
+
+R = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "paper_results")
+
+
+def sites(aoi):  # same rule as s15_worldstrat_sensors.sites
+    aoi = pd.Series(aoi).astype(str)
+    multi = aoi.str.match(r"^(Amnesty|ASMSpotter)")
+    return np.where(multi, aoi.str.replace(r"-\d+-\d+$", "", regex=True), aoi), multi.values
+
+
+def load(name):
+    p = os.path.join(R, name)
+    return dict(np.load(p, allow_pickle=False)) if os.path.exists(p) else None
+
+
+def match(vb, ws, k=10):
+    """vb [n,16,29], ws [m,16,29] -> index into ws, set distance, margin to the second best area.
+    Each data set is standardised per dimension separately (the two uint8 conversions may differ by a per-band scale);
+    the revisit order may differ, so candidates found on the revisit mean are re-ranked by a set distance."""
+    def z(a):
+        a = a.astype(np.float32)
+        return (a - a.mean((0, 1))) / (a.std((0, 1)) + 1e-6)
+    V, W = z(vb), z(ws)
+    vm, wm = V.mean(1), W.mean(1)
+    d = ((vm[:, None] - wm[None]) ** 2).sum(-1) if len(V) * len(W) < 4e7 else None
+    idx, dist, marg = np.zeros(len(V), int), np.zeros(len(V)), np.zeros(len(V))
+    for i in range(len(V)):
+        di = d[i] if d is not None else ((vm[i] - wm) ** 2).sum(-1)
+        cand = np.argsort(di)[:k]
+        sd = [np.sqrt(((V[i][:, None] - W[c][None]) ** 2).sum(-1)).min(1).mean() for c in cand]
+        o = np.argsort(sd)
+        idx[i], dist[i], marg[i] = cand[o[0]], sd[o[0]], sd[o[1]] / max(sd[o[0]], 1e-9)
+    return idx, dist, marg
+
+
+def acc_ci(c):
+    c = np.asarray(c, float)
+    return {"n": int(len(c)), "acc": float(c.mean() * 100) if len(c) else None,
+            "ci95": float(1.96 * np.sqrt(c.mean() * (1 - c.mean()) / max(len(c), 1)) * 100) if len(c) else None}
+
+
+def paired(pa, pb, y, n_boot=10000, seed=0):
+    a, b = pa.argmax(1) == y, pb.argmax(1) == y
+    n01, n10 = int((~a & b).sum()), int((a & ~b).sum())
+    p = binomtest(n10, n10 + n01, 0.5).pvalue if n10 + n01 else 1.0
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(y), (n_boot, len(y)))
+    diff = (a[idx].mean(1) - b[idx].mean(1)) * 100
+    return {"diff": float((a.mean() - b.mean()) * 100), "lo": float(np.percentile(diff, 2.5)), "hi": float(np.percentile(diff, 97.5)),
+            "mcnemar_p": float(p), "a_only": n10, "b_only": n01}
+
+
+def f1_per_class(y, pred, C):
+    out = []
+    for c in range(C):
+        tp, fp, fn = ((pred == c) & (y == c)).sum(), ((pred == c) & (y != c)).sum(), ((pred != c) & (y == c)).sum()
+        out.append(float(2 * tp / max(2 * tp + fp + fn, 1) * 100))
+    return out
+
+
+def main():
+    res = {}
+    vfp, wfp = load("vb_fingerprints.npz"), load("ws_fingerprints.npz")
+    aoi_path = os.path.join(R, "ws_aoi.csv")
+    sib_te = None
+    if vfp is not None and wfp is not None and os.path.exists(aoi_path):
+        aoi = pd.read_csv(aoi_path)["AOI"].values
+        site, multi = sites(aoi)
+        W = wfp["fp"]
+        itr, dtr, mtr = match(vfp["train"], W)
+        ite, dte, mte = match(vfp["test"], W)
+        res["mapping"] = {"train_unique": int(len(set(itr))), "test_unique": int(len(set(ite))), "n_train": int(len(itr)),
+                          "n_test": int(len(ite)), "train_test_same_area": int(len(set(itr) & set(ite))),
+                          "margin_median": float(np.median(np.r_[mtr, mte])), "margin_p5": float(np.percentile(np.r_[mtr, mte], 5)),
+                          "dist_median": float(np.median(np.r_[dtr, dte]))}
+        tr_sites = set(site[itr])
+        sib_te = np.array([multi[j] and site[j] in tr_sites for j in ite])
+        res["sibling"] = {"test_multi_tile": int(multi[ite].sum()), "test_with_train_sibling": int(sib_te.sum()),
+                          "share": float(sib_te.mean() * 100), "train_multi_tile": int(multi[itr].sum()),
+                          "test_label_counts_sibling": np.bincount(vfp["y_test"][sib_te], minlength=4).tolist()}
+        np.savez_compressed(os.path.join(R, "vb_ws_mapping.npz"), train=itr, test=ite, sibling_test=sib_te)
+        print("mapping", res["mapping"], "\nsibling", res["sibling"])
+
+    methods = {}
+    fr = load("vb_frozen_probs.npz")
+    y = None
+    if fr is not None:
+        y = fr.pop("y")
+        for k, v in fr.items():
+            methods[f"frozen {k}"] = v.astype(np.float32)  # [seeds,785,4]
+    for name, f in (("SplitNN VertiBench recipe", "vb_repro_splitresnet_preds_probs.npz"), ("split CLIP-B", "vb_split_clipb_probs.npz")):
+        d = load(f)
+        if d is None:
+            continue
+        y = d.pop("y") if y is None else (d.pop("y"), y)[1]
+        groups = {}
+        for k, v in d.items():
+            groups.setdefault(k.split("__seed")[0] if "__seed" in k else "", []).append(v.astype(np.float32))
+        for g, vs in groups.items():
+            methods[f"{name} {g}".strip()] = np.stack(vs)
+    if methods:
+        res["subsets"] = {}
+        for m, P in methods.items():
+            c = P.mean(0).argmax(1) == y
+            per_seed = [(p.argmax(1) == y).mean() * 100 for p in P]
+            e = {"seeds": len(P), "acc_mean_of_seeds": float(np.mean(per_seed)), "all": acc_ci(c)}
+            if sib_te is not None:
+                e["sibling"], e["no_sibling"] = acc_ci(c[sib_te]), acc_ci(c[~sib_te])
+            res["subsets"][m] = e
+            print(f"{m:45s}", {k: (v["acc"] if isinstance(v, dict) else v) for k, v in e.items()})
+        ref = methods.get("SplitNN VertiBench recipe")
+        if ref is not None:
+            res["paired"] = {}
+            for m, P in methods.items():
+                if m.startswith("SplitNN"):
+                    continue
+                res["paired"][m] = {"all": paired(P.mean(0), ref.mean(0), y)}
+                if sib_te is not None:
+                    res["paired"][m]["no_sibling"] = paired(P.mean(0)[~sib_te], ref.mean(0)[~sib_te], y[~sib_te])
+                print("paired vs SplitNN", m, res["paired"][m]["all"])
+
+    nn = load("vb_nnpublic.npz")
+    if nn is not None and vfp is not None:
+        loc, ytr, yte = nn["loc"].astype(int), vfp["y_train"], vfp["y_test"]
+        lm = ytr[loc] == yte[:, None]  # [785,16]
+        e = {"label_match_all": float(lm.mean() * 100)}
+        if sib_te is not None:
+            site_tr = site[itr]
+            nn_sib = np.array([[multi[ite[i]] and site_tr[loc[i, p]] == site[ite[i]] for p in range(16)] for i in range(len(ite))])
+            e.update({"nn_is_sibling_given_sibling": float(nn_sib[sib_te].mean() * 100),
+                      "label_match_sibling": float(lm[sib_te].mean() * 100), "label_match_no_sibling": float(lm[~sib_te].mean() * 100)})
+        res["nnpublic"] = e
+        print("nnpublic", e)
+
+    oof = load("ws_sensors_oof_grouped.npz")
+    if oof is not None:
+        meta = json.load(open(os.path.join(R, "ws_sensors_grouped.json"))) if os.path.exists(os.path.join(R, "ws_sensors_grouped.json")) else {}
+        res["ws_f1"] = {}
+        for task in ("ipcc", "lccs", "smod"):
+            if f"{task}__y" not in oof:
+                continue
+            yy = oof[f"{task}__y"]
+            C = int(yy.max()) + 1
+            out = {"classes": meta.get(task, {}).get("classes"), "counts": np.bincount(yy, minlength=C).tolist(), "configs": {}}
+            for k, v in oof.items():
+                if k.startswith(task + "__") and k.split("__", 1)[1] not in ("y", "sel", "fold"):
+                    out["configs"][k.split("__", 1)[1]] = f1_per_class(yy, v.astype(np.float32).argmax(1), C)
+            res["ws_f1"][task] = out
+    json.dump(res, open(os.path.join(R, "vb_audit_analysis.json"), "w"), indent=1)
+    print("wrote vb_audit_analysis.json")
+
+
+if __name__ == "__main__":
+    main()
