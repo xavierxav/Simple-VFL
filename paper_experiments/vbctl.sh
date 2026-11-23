@@ -1,6 +1,6 @@
 #!/bin/bash
 # VPS-side helper for a Colab session ($VB_SESSION, default "vb").  usage:
-#   vbctl.sh setup | launch NAME "CMD" | tail NAME [N] | ls | fetch "commit message"
+#   vbctl.sh setup | launch NAME "CMD" | tail NAME [N] | ls | fetch "commit message" | rclone
 cd /home/opencode/projects/Simple-VFL || exit 1
 run() {
   local out
@@ -22,5 +22,9 @@ case "$1" in
     ls -la paper_results
     git add paper_results; git commit -qm "${2:-paper: results}" || true  # push even when nothing new (earlier commits)
     git pull -q --rebase origin claude/simple-vfl-paper-publication-qx73nw && git push -q origin claude/simple-vfl-paper-publication-qx73nw; git log --oneline -1 ;;
-  *) echo "usage: vbctl.sh setup|launch|tail|ls|fetch" ;;
+  rclone)  # give the runtime the VPS's Drive remote gdrive: (rclone copy/mount to gdrive:<projet>/, no per-runtime consent)
+    cfg=$(rclone config file | tail -1)
+    b64=$(awk '/^\[gdrive\]/{f=1; print; next} /^\[/{f=0} f' "$cfg" | base64 -w0)
+    T=180 run --env CTL_ACTION=rclone --env "CTL_RCLONE_B64=$b64" | grep -v -i -E "token|CTL_RCLONE" ;;
+  *) echo "usage: vbctl.sh setup|launch|tail|ls|fetch|rclone" ;;
 esac
