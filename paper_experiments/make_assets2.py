@@ -70,6 +70,8 @@ enc = load("vb224_encoders.json") or {}
 heads224 = enc.get("heads", {})
 cost = enc.get("cost", {})
 Eg = load("vb224_controls_dinov2_g.json") or {}
+if (load("vb224_controls_dinov2_g_dp.json") or {}).get("E4_dp"):  # third review: clipping norm per party
+    Eg["E4_dp"] = load("vb224_controls_dinov2_g_dp.json")["E4_dp"]
 Ec = load("vb224_controls_clip_l14.json") or {}
 Eold = load("vb_controls.json") or {}
 pool = load("vb224_pooling.json")
@@ -86,6 +88,10 @@ if _v2:  # revised attacker (second review): shared deconvolutional decoder + li
                 del _v2[_part][_k]
         for _k, _v in ((_v2b or {}).get(_part) or {}).items():
             _v2.setdefault(_part, {})[_k] = _v
+    _dp = load("vb224_inversion_v2dp.json")  # third review: DP rows re-run with a clipping norm per party
+    for _part in ("single", "ridge"):
+        for _k, _v in ((_dp or {}).get(_part) or {}).items():
+            _v2.setdefault(_part, {})[_k] = _v
     inv = _v2
     for _f, _pca in (("vb224_inversion_v2_examples.npz", False), ("vb224_inversion_v2b_examples.npz", True)):
         if os.path.exists(os.path.join(RES, _f)):
@@ -96,7 +102,7 @@ elif os.path.exists(os.path.join(RES, "vb224_inversion_examples.npz")):
     INV_NPZ = {k: _z[k] for k in _z.files}
 he = {}
 for _f in sorted(os.listdir(RES)) if os.path.isdir(RES) else []:
-    if _f.startswith("he_heads") and _f.endswith(".json"):
+    if _f.startswith("he_heads") and _f.endswith(".json") and not (_f == "he_heads_ws.json" and os.path.exists(os.path.join(RES, "he_heads_ws_grouped.json"))):
         _d = load(_f)
         he.setdefault("he_cost", {}).update(_d.pop("he_cost", {}))
         for _k, _v in _d.items():  # deep merge: the he_heads_r_* re-runs only add heads (ridge_sel) to existing tasks
@@ -110,8 +116,12 @@ for _f in sorted(os.listdir(RES)) if os.path.isdir(RES) else []:
                 he[_k] = _v
 milk = load("milk_heads.json")
 msplit = load("milk_split.json") or {}
+msplit2 = load("milk_split_v2.json") or {}  # third review: frozen bottoms under the split-learning recipe, re-run of LoRA
+aud = load("vb_audit.json") or {}  # kept probabilities, four-logit head, re-encoded linkage, nearest public location
+ana = load("vb_audit_analysis.json") or {}  # stage 23: sibling subsets, paired tests against SplitNN
+clipb = load("vb_split_clipb.json") or {}  # split learning with CLIP-B bottoms on VertiBench
 cls = load("classic.json") or {}
-ws = load("ws_sensors.json")
+ws = load("ws_sensors_grouped.json") or load("ws_sensors.json")  # third review: folds grouped by site
 base = {k: load(f"baseline_{k}.json") for k in ["splitnn_all", "splitnn_rgb", "splitnn_rgb_pt", "ssl_all", "ssl_rgb", "nat_all"]}
 K, N_TR = 16, 3142
 
@@ -143,6 +153,41 @@ for k, bands, lab in (("splitnn_all", 13, "SplitNN, our recipe, scratch"), ("spl
     b = base[k]
     if b:
         rows.append(row(lab, bands, size(4 * K * 512 * b["epochs"]), None, np.mean(b["secs_per_seed"]) / 60, b["summary"]))
+N_TR_H, N_VA_H, N_TE = int(N_TR * 0.85), N_TR - int(N_TR * 0.85), 785
+for k, lab in (("clip_b16_lora", "CLIP ViT-B/16 bottoms, LoRA"), ("clip_b16_frozen", "CLIP ViT-B/16 bottoms, frozen")):
+    s = clipb.get(k, {})
+    if not s.get("summary"):
+        continue
+    E = s["infos"][0]["epochs"]
+    tr_bytes = np.mean([i["bytes_per_train_sample"] for i in s["infos"]]) * 2 * E * N_TR_H / (2 * E * N_TR_H + E * N_VA_H + N_TE)
+    if k.endswith("frozen"):  # frozen bottoms need no gradients: one augmented upload per epoch
+        tr_bytes /= 2
+    gf = cost.get("clip_b16_224", {}).get("flops_per_image")
+    rows.append(row(lab + (", 3 seeds" if s["summary"]["n"] == 3 else f", {s['summary']['n']} seed" + ("s" if s["summary"]["n"] > 1 else "")), 3,
+                    size(tr_bytes), (3 if "lora" in k else 1) * gf * E / 1e9 if gf else None, np.mean([i["secs"] for i in s["infos"]]) / 60, s["summary"]))
+    t = "Lora" if "lora" in k else "Frozen"
+    macro(f"vbSplit{t}Acc", f1(s["summary"]["acc"]))
+    macro(f"vbSplit{t}Fone", f1(s["summary"]["f1"]))
+    macro(f"vbSplit{t}Up", size(tr_bytes))
+    macro(f"vbSplit{t}Min", f"{np.mean([i['secs'] for i in s['infos']]) / 60:.0f}")
+    macro(f"vbSplit{t}N", str(s["summary"]["n"]))
+lg = [(k.split("|")[0], v) for k, v in aud.get("heads", {}).items() if k.split("|")[1].startswith("logits")]
+if lg:
+    rows.append("\\midrule")
+    rows.append("\\multicolumn{8}{@{}l}{\\emph{Few rounds, frozen features: each party trains an MLP to 4 logits (logits up, their gradients down)}}\\\\")
+    for k, v in sorted(lg, key=lambda kv: ["clip_l14_224", "dinov2_g_224", "clip_b16_224"].index(kv[0]) if kv[0] in ("clip_l14_224", "dinov2_g_224", "clip_b16_224") else 9):
+        c = cost.get(k, {})
+        gf = c.get("flops_per_image")
+        rows.append(row(NAME[k], 3, size(v["bytes_per_train_sample"]), gf / 1e9 if gf else None,
+                        c.get("extract_secs_all_images") / 60 if c.get("extract_secs_all_images") else None, v))
+        t = {"clip_l14_224": "Clip", "dinov2_g_224": "G", "clip_b16_224": "ClipB"}.get(k, k)
+        macro(f"lg{t}Acc", f1(v["acc"]))
+        macro(f"lg{t}Fone", f1(v["f1"]))
+        macro(f"lg{t}Up", size(v["bytes_per_train_sample"]))
+        macro(f"lg{t}Ep", f"{np.median(v['epochs_run']):.0f}")
+        m2 = aud["heads"].get(f"{k}|mlp2")
+        if m2:
+            macro(f"lg{t}Gap", f1(m2["acc"] - v["acc"]))
 rows.append("\\midrule")
 rows.append("\\multicolumn{8}{@{}l}{\\emph{One-shot, party-side self-supervised training (FedOnce)}}\\\\")
 for k, bands, lab in (("nat_all", 13, "FedOnce (Noise As Targets)"), ("ssl_all", 13, "FedOnce, SimCLR variant"), ("ssl_rgb", 3, "FedOnce, SimCLR variant")):
@@ -500,7 +545,7 @@ if ws:
             macro(f"ws{tt}N", f"{sum(r['counts']):,}".replace(",", "{,}"))
 
 # ------------------------------------------------------------------ WorldStrat: making the second party help (s16)
-wf = load("ws_fusion.json")
+wf = load("ws_fusion_grouped.json") or load("ws_fusion.json")
 if wf:
     FT = [("ipcc", "IPCC"), ("lccs", "LCCS"), ("smod", "SMOD")]
     FR = [("SPOT|mlp2", "SPOT, full area", "--"), ("SPOT tiles mean|mlp2", "SPOT, mean of 16 tiles at full resolution", "--"),
@@ -1013,6 +1058,82 @@ for key, tag in (("milk10k/dinov2_g/pca64", "Milk"), ("vertibench/dinov2_g_224/p
             macro("hcMilkFullUnwH", f"{unw / 3600:.0f}")
             macro("hcMilkFullH", f"{(unw + K * 1536 * 1537 / 2 * tp) / 3600:.0f}")
             macro("hcMilkFullUp", size(2 * 1536 * c["chunks"] * c["ciphertext_bytes"]))
+
+# ------------------------------------------------------------------ third review: audit of the VertiBench split and of the comparisons
+if ana.get("mapping"):
+    mp, sb = ana["mapping"], ana["sibling"]
+    macro("auMapTrain", f"{mp['train_unique']:,}".replace(",", "{,}"))
+    macro("auMapTest", str(mp["test_unique"]))
+    macro("auMapOverlap", str(mp["train_test_same_area"]))
+    macro("auMargin", f"{mp['margin_p5']:.1f}")
+    macro("auSibN", str(sb["test_with_train_sibling"]))
+    macro("auSibShare", f1(sb["share"]))
+    macro("auNoSibN", str(mp["n_test"] - sb["test_with_train_sibling"]))
+AU = {"frozen clip_l14_224__mlp2": "Clip", "frozen dinov2_g_224__mlp2": "G", "frozen clip_b16_224__mlp2": "ClipB",
+      "frozen clip_l14_224__logits16": "LgClip", "frozen dinov2_g_224__logits16": "LgG", "frozen clip_b16_224__logits16": "LgClipB",
+      "SplitNN VertiBench recipe": "Sn", "split CLIP-B clip_b16_lora": "Lora", "split CLIP-B clip_b16_frozen": "SplitFrozen"}
+for k, t in AU.items():
+    e = ana.get("subsets", {}).get(k)
+    if not e:
+        continue
+    macro(f"au{t}All", f1(e["all"]["acc"]))
+    if "sibling" in e:
+        macro(f"au{t}Sib", f1(e["sibling"]["acc"]))
+        macro(f"au{t}NoSib", f1(e["no_sibling"]["acc"]))
+        macro(f"au{t}SibDrop", f1(e["sibling"]["acc"] - e["no_sibling"]["acc"]))
+    p = ana.get("paired", {}).get(k)
+    if p:
+        for sub, tag in (("all", ""), ("no_sibling", "NoSib")):
+            if sub in p:
+                macro(f"pairSn{t}{tag}Diff", f1(p[sub]["diff"]))
+                macro(f"pairSn{t}{tag}Lo", f1(p[sub]["lo"]))
+                macro(f"pairSn{t}{tag}Hi", f1(p[sub]["hi"]))
+                pv = p[sub]["mcnemar_p"]
+                macro(f"pairSn{t}{tag}P", f"{pv:.3f}" if pv >= 0.001 else "<0.001")
+if ana.get("nnpublic"):
+    n = ana["nnpublic"]
+    for key, t in (("label_match_all", "All"), ("label_match_sibling", "Sib"), ("label_match_no_sibling", "NoSib"), ("nn_is_sibling_given_sibling", "IsSib")):
+        if key in n:
+            macro(f"nnPub{t}", f1(n[key]))
+if aud.get("nnpublic"):
+    macro("nnPubAuditAll", f1(aud["nnpublic"]["label_match_all"]))
+lk = aud.get("linkage")
+if lk:
+    macro("lkN", f"{lk['n_images']:,}".replace(",", "{,}"))
+    macro("lkDup", str(lk["duplicate_uploads"]))
+    for k, t in (("same preprocessing", "Same"), ("bicubic resize", "Bicubic"), ("8-bit resized image", "Eightbit"), ("CLIP preprocessing", "Clip")):
+        if k in lk:
+            macro(f"lk{t}", f1(lk[k]["top1"]))
+            macro(f"lk{t}Party", f1(lk[k]["top1_within_party_min"]))
+            macro(f"lk{t}Ties", str(lk[k]["ties"]))
+            macro(f"lk{t}Cos", f"{lk[k]['cos_true_min']:.3f}")
+# MILK10k: the same split-learning recipe with frozen and LoRA bottoms (paired by fold)
+for b, t in (("dinov2_b", "B"), ("clip_b16", "Cb")):
+    fr, lo = msplit2.get(f"{b}_frozen"), msplit2.get(f"{b}_lora")
+    if fr and lo:
+        d = np.array(lo["f1s"]) - np.array(fr["f1s"])
+        macro(f"srFrozen{t}", f1(fr["f1"]))
+        macro(f"srLora{t}", f1(lo["f1"]))
+        macro(f"srGap{t}", f1(d.mean()))
+        macro(f"srGapSd{t}", f1(d.std(ddof=1)))
+        macro(f"srWins{t}", str(int((d > 0).sum())))
+        fz = (milk or {}).get(b, {}).get("clin+derm|mlp2|bal")
+        if fz:
+            macro(f"srVsHead{t}", f1(fr["f1"] - fz["f1"]))  # frozen bottoms under the split recipe vs the one-shot head
+if msplit2.get("dinov2_b_ft"):
+    macro("srFt", f1(msplit2["dinov2_b_ft"]["f1"]))
+# WorldStrat per-class F1 (grouped out-of-fold predictions)
+wsf = ana.get("ws_f1", {})
+for task in ("ipcc", "lccs"):
+    e = wsf.get(task)
+    if not e or not e.get("classes"):
+        continue
+    cfg = e["configs"]
+    a, bb = cfg.get("SPOT 1.5m|mlp2"), cfg.get("SPOT 1.5m + S2 MS|mlp2")
+    if a and bb:
+        gains = sorted(zip(np.array(bb) - np.array(a), e["classes"], e["counts"]), reverse=True)
+        macro(f"wc{task.capitalize()}Top", ", ".join(f"{c} ({g:+.0f}, {n} areas)" for g, c, n in gains[:3]))
+        macro(f"wc{task.capitalize()}Neg", str(int(sum(g < 0 for g, _, _ in gains))))
 
 # ------------------------------------------------------------------ placeholders, so that the paper compiles on partial results
 for t in ("tab_main", "tab_encoders", "tab_combo_enc", "tab_classic", "tab_sun", "tab_milk", "tab_milkfusion", "tab_milkreg", "tab_freeze", "tab_ws", "tab_wsfusion",
