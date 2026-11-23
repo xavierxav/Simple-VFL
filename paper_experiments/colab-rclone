@@ -1,0 +1,37 @@
+#!/bin/bash
+# colab-rclone SESSION - give a running Colab runtime the VPS's Drive remote `gdrive:` (rooted at claude-projects), so
+# that it can `rclone copy ... gdrive:<projet>/...` without Colab's per-runtime Drive consent (`colab drivemount`).
+#
+# The token never goes through a terminal, a log or an LLM: the [gdrive] section of the VPS rclone config is written
+# by this script to a private temporary file (mode 600), sent with the colab CLI's file upload, installed on the
+# runtime with mode 600, and the temporary file is deleted.  Nothing of the config is printed.
+# Usage: colab-rclone SESSION        (then, on the runtime: rclone copy SRC gdrive:<projet>/...; never `rclone sync`)
+set -euo pipefail
+S=${1:?usage: colab-rclone SESSION}
+CONF=$(rclone config file | tail -n 1)
+[ -r "$CONF" ] || { echo "colab-rclone: no readable rclone config on this machine" >&2; exit 1; }
+
+umask 077
+TMP=$(mktemp)
+PY=$(mktemp --suffix .py)
+trap 'rm -f "$TMP" "$PY"' EXIT
+awk '/^\[gdrive\]/{f=1; print; next} /^\[/{f=0} f' "$CONF" > "$TMP"
+grep -q '^type *= *drive' "$TMP" || { echo "colab-rclone: no [gdrive] drive remote in the rclone config" >&2; exit 1; }
+
+REMOTE=/root/.colab_rclone_upload.conf
+colab upload -s "$S" "$TMP" "$REMOTE" > /dev/null 2>&1 || { echo "colab-rclone: upload to session $S failed" >&2; exit 1; }
+
+cat > "$PY" <<EOF
+import os, subprocess
+d = "/root/.config/rclone"
+os.makedirs(d, mode=0o700, exist_ok=True)
+os.replace("$REMOTE", d + "/rclone.conf")
+os.chmod(d + "/rclone.conf", 0o600)
+sh = lambda c: subprocess.run(c, shell=True, capture_output=True, text=True)
+if sh("which rclone").returncode:
+    sh("curl -fsSL https://rclone.org/install.sh | bash > /tmp/rclone_install.log 2>&1")
+v = sh("rclone version").stdout.split("\n")[0]
+r = sh("rclone lsd gdrive: --max-depth 1")
+print("colab-rclone:", v or "rclone missing", "| gdrive:", "ok" if r.returncode == 0 else "FAILED " + r.stderr.strip()[-200:])
+EOF
+timeout 300 colab exec -s "$S" --timeout 240 -f "$PY" 2>&1 | grep -E '^colab-rclone:' || { echo "colab-rclone: install step failed on $S" >&2; exit 1; }

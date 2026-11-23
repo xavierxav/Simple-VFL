@@ -22,9 +22,7 @@ case "$1" in
     ls -la paper_results
     git add paper_results; git commit -qm "${2:-paper: results}" || true  # push even when nothing new (earlier commits)
     git pull -q --rebase origin claude/simple-vfl-paper-publication-qx73nw && git push -q origin claude/simple-vfl-paper-publication-qx73nw; git log --oneline -1 ;;
-  rclone)  # give the runtime the VPS's Drive remote gdrive: (rclone copy/mount to gdrive:<projet>/, no per-runtime consent)
-    cfg=$(rclone config file | tail -1)
-    b64=$(awk '/^\[gdrive\]/{f=1; print; next} /^\[/{f=0} f' "$cfg" | base64 -w0)
-    T=180 run --env CTL_ACTION=rclone --env "CTL_RCLONE_B64=$b64" | grep -v -i -E "token|CTL_RCLONE" ;;
+  rclone)  # Drive for the runtime through the VPS's rclone remote gdrive: (the config is uploaded as a file, never printed)
+    if command -v colab-rclone > /dev/null; then colab-rclone "${VB_SESSION:-vb}"; else bash paper_experiments/colab-rclone "${VB_SESSION:-vb}"; fi ;;
   *) echo "usage: vbctl.sh setup|launch|tail|ls|fetch|rclone" ;;
 esac

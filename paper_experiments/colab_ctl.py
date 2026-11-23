@@ -50,19 +50,6 @@ elif A == "b64":  # results dir (small files only) as a base64 tarball between m
             if os.path.isfile(fp) and os.path.getsize(fp) < 5_000_000:
                 t.add(fp, arcname=f)
     print("B64START" + base64.b64encode(buf.getvalue()).decode() + "B64END")
-elif A == "rclone":  # the VPS's Drive remote (gdrive:, scope drive.file, rooted at claude-projects) on this runtime:
-    # durable Drive access without Colab's per-runtime consent; the config arrives base64-encoded and is never printed
-    import base64
-    os.makedirs("/root/.config/rclone", exist_ok=True)
-    p = "/root/.config/rclone/rclone.conf"
-    with open(p, "w") as f:
-        f.write(base64.b64decode(os.environ["CTL_RCLONE_B64"]).decode())
-    os.chmod(p, 0o600)
-    if sh("which rclone").returncode:
-        r = sh("curl -fsSL https://rclone.org/install.sh | bash > /tmp/rclone_install.log 2>&1; rclone version | head -1")
-        print(r.stdout.strip(), r.stderr[-300:])
-    r = sh("rclone lsd gdrive: 2>&1 | head -5")
-    print("rclone gdrive:", "ok" if r.returncode == 0 else "FAILED", "|", r.stdout.strip()[-400:])
 elif A == "ping":
     print("pong")
 elif A == "ls":
