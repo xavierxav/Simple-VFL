@@ -3,35 +3,83 @@
 # that it can `rclone copy ... gdrive:<projet>/...` without Colab's per-runtime Drive consent (`colab drivemount`).
 #
 # The token never goes through a terminal, a log or an LLM: the [gdrive] section of the VPS rclone config is written
-# by this script to a private temporary file (mode 600), sent with the colab CLI's file upload, installed on the
-# runtime with mode 600, and the temporary file is deleted.  Nothing of the config is printed.
+# by this script to a private temporary file (mode 600, in RAM when /dev/shm exists), sent with the colab CLI's file
+# upload, merged on the runtime into its rclone config (mode 600; other remotes kept), and both copies are deleted.
+# Nothing of the config is printed; on failure only exit codes are reported.  Exit 0 only if `rclone lsd gdrive:` works.
 # Usage: colab-rclone SESSION        (then, on the runtime: rclone copy SRC gdrive:<projet>/...; never `rclone sync`)
 set -euo pipefail
 S=${1:?usage: colab-rclone SESSION}
+TMP=; PY=; REMOTE=/root/.colab_rclone_upload.conf; UPLOADED=0
+cleanup() {
+  rm -f "${TMP:-}" "${PY:-}"
+  if [ "$UPLOADED" = 1 ]; then timeout 60 colab rm -s "$S" "$REMOTE" > /dev/null 2>&1 || true; fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+
 CONF=$(rclone config file | tail -n 1)
 [ -r "$CONF" ] || { echo "colab-rclone: no readable rclone config on this machine" >&2; exit 1; }
+if grep -q '^RCLONE_ENCRYPT_V0:' "$CONF"; then echo "colab-rclone: the rclone config is encrypted (not supported)" >&2; exit 1; fi
 
 umask 077
-TMP=$(mktemp)
+D=/dev/shm; [ -d "$D" ] && [ -w "$D" ] || D=${TMPDIR:-/tmp}
+TMP=$(mktemp -p "$D")
 PY=$(mktemp --suffix .py)
-trap 'rm -f "$TMP" "$PY"' EXIT
-awk '/^\[gdrive\]/{f=1; print; next} /^\[/{f=0} f' "$CONF" > "$TMP"
-grep -q '^type *= *drive' "$TMP" || { echo "colab-rclone: no [gdrive] drive remote in the rclone config" >&2; exit 1; }
+awk '/^[[:space:]]*\[gdrive\][[:space:]]*$/{f=1; print; next} /^[[:space:]]*\[/{f=0} f && !/^[[:space:]]*[#;]/' \
+  "$CONF" > "$TMP"
+grep -Eq '^[[:space:]]*type[[:space:]]*=[[:space:]]*drive[[:space:]]*$' "$TMP" \
+  || { echo "colab-rclone: no [gdrive] drive remote in the rclone config" >&2; exit 1; }
 
-REMOTE=/root/.colab_rclone_upload.conf
-colab upload -s "$S" "$TMP" "$REMOTE" > /dev/null 2>&1 || { echo "colab-rclone: upload to session $S failed" >&2; exit 1; }
+UPLOADED=1  # from here on, try to remove the runtime copy if anything fails
+timeout 120 colab upload -s "$S" "$TMP" "$REMOTE" > /dev/null 2>&1 \
+  || { echo "colab-rclone: upload to session $S failed" >&2; exit 1; }
+rm -f "$TMP"
 
 cat > "$PY" <<EOF
-import os, subprocess
-d = "/root/.config/rclone"
-os.makedirs(d, mode=0o700, exist_ok=True)
-os.replace("$REMOTE", d + "/rclone.conf")
-os.chmod(d + "/rclone.conf", 0o600)
-sh = lambda c: subprocess.run(c, shell=True, capture_output=True, text=True)
-if sh("which rclone").returncode:
-    sh("curl -fsSL https://rclone.org/install.sh | bash > /tmp/rclone_install.log 2>&1")
-v = sh("rclone version").stdout.split("\n")[0]
-r = sh("rclone lsd gdrive: --max-depth 1")
-print("colab-rclone:", v or "rclone missing", "| gdrive:", "ok" if r.returncode == 0 else "FAILED " + r.stderr.strip()[-200:])
+import os, re, subprocess, tempfile
+up = "$REMOTE"
+def run(c, t):
+    try:
+        return subprocess.run(c, shell=True, capture_output=True, text=True, timeout=t).returncode
+    except subprocess.TimeoutExpired:
+        return 124
+try:
+    os.chmod(up, 0o600)
+    conf = os.environ.get("RCLONE_CONFIG") or "/root/.config/rclone/rclone.conf"
+    d = os.path.dirname(conf)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    os.chmod(d, 0o700)
+    new = open(up).read().rstrip("\n") + "\n"
+    old = open(conf).read() if os.path.exists(conf) else ""
+    # keep the other remotes of an existing config, drop its [gdrive] section
+    keep, f = [], False
+    for line in old.splitlines():
+        if re.match(r"\s*\[", line):
+            f = re.match(r"\s*\[gdrive\]\s*$", line) is not None
+        if not f:
+            keep.append(line)
+    body = ("\n".join(keep).strip("\n") + "\n\n" if "".join(keep).strip() else "") + new
+    fd, tmp = tempfile.mkstemp(dir=d)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(body)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, conf)
+finally:
+    if os.path.exists(up):
+        os.remove(up)
+if run("command -v rclone", 10):
+    rc = run("curl -fsSL -o /tmp/rclone_install.sh https://rclone.org/install.sh && bash /tmp/rclone_install.sh", 240)
+    if rc:
+        print("colab-rclone: rclone install failed (exit %d)" % rc)
+try:
+    r = subprocess.run("rclone version", shell=True, capture_output=True, text=True, timeout=30)
+    v = r.stdout.split("\n")[0] if r.returncode == 0 else "rclone missing"
+except subprocess.TimeoutExpired:
+    v = "rclone version timed out"
+rc = run("rclone lsd gdrive: --max-depth 1 --retries 1 --timeout 30s", 90)
+print("colab-rclone: %s | gdrive: %s" % (v, "ok" if rc == 0 else "FAILED (exit %d)" % rc))
 EOF
-timeout 300 colab exec -s "$S" --timeout 240 -f "$PY" 2>&1 | grep -E '^colab-rclone:' || { echo "colab-rclone: install step failed on $S" >&2; exit 1; }
+OUT=$(timeout 420 colab exec -s "$S" --timeout 400 -f "$PY" 2>&1 | grep -E '^colab-rclone:' || true)
+[ -n "$OUT" ] && echo "$OUT"
+grep -Eq '^colab-rclone: .+ \| gdrive: ok$' <<< "$OUT" || { echo "colab-rclone: install step failed on $S" >&2; exit 1; }
+UPLOADED=0  # the runtime script already removed its upload copy
