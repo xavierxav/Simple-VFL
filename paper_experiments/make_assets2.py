@@ -1089,13 +1089,14 @@ for k, t in AU.items():
         macro(f"au{t}SibDrop", f1(e["sibling"]["acc"] - e["no_sibling"]["acc"]))
     p = ana.get("paired", {}).get(k)
     if p:
+        macro(f"pairSn{t}N", str(p["seeds"]))
         for sub, tag in (("all", ""), ("no_sibling", "NoSib")):
             if sub in p:
                 macro(f"pairSn{t}{tag}Diff", f1(p[sub]["diff"]))
                 macro(f"pairSn{t}{tag}Lo", f1(p[sub]["lo"]))
                 macro(f"pairSn{t}{tag}Hi", f1(p[sub]["hi"]))
                 pv = p[sub]["mcnemar_p"]
-                macro(f"pairSn{t}{tag}P", f"{pv:.3f}" if pv >= 0.001 else "<0.001")
+                macro(f"pairSn{t}{tag}P", f"{{=}}{pv:.3f}" if pv >= 0.001 else "{<}0.001")
 if ana.get("nnpublic"):
     n = ana["nnpublic"]
     for key, t in (("label_match_all", "All"), ("label_match_sibling", "Sib"), ("label_match_no_sibling", "NoSib"), ("nn_is_sibling_given_sibling", "IsSib")):
@@ -1125,7 +1126,7 @@ for b, t in (("dinov2_b", "B"), ("clip_b16", "Cb")):
         macro(f"srWins{t}", str(int((d > 0).sum())))
         fz = (milk or {}).get(b, {}).get("clin+derm|mlp2|bal")
         if fz:
-            macro(f"srVsHead{t}", f1(fr["f1"] - fz["f1"]))  # frozen bottoms under the split recipe vs the one-shot head
+            macro(f"srVsHead{t}", f"{fr['f1'] - fz['f1']:+.1f}")  # split recipe vs the one-shot head; use in math mode
 if msplit2.get("dinov2_b_ft"):
     macro("srFt", f1(msplit2["dinov2_b_ft"]["f1"]))
 # WorldStrat per-class F1 (grouped out-of-fold predictions)
