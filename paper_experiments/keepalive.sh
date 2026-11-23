@@ -16,7 +16,12 @@ while [ "$(date +%s)" -lt $end ]; do
     VB_SESSION=$S bash paper_experiments/vbctl.sh fetch "paper: results ($S, final)"
     colab stop -s "$S"; echo "$(date +%H:%M) chain done, $S stopped"; exit 0
   fi
-  if echo "$out" | grep -q -E "not found|appears to be lost"; then echo "$(date +%H:%M) session $S lost"; exit 1; fi
+  # a transient connection error also reads "appears to be lost": give up only after 3 failed checks in a row
+  if echo "$out" | grep -q -E "not found|appears to be lost"; then
+    lost=$((${lost:-0} + 1)); [ $lost -ge 3 ] && { echo "$(date +%H:%M) session $S lost"; exit 1; }
+    sleep 60; continue
+  fi
+  lost=0
   [ $((n % 7)) -eq 0 ] && VB_SESSION=$S bash paper_experiments/vbctl.sh fetch "paper: results ($S, partial)" > /dev/null 2>&1
   [ -f /tmp/stop_keepalive_$S ] && { echo "stop requested"; exit 0; }
   sleep 240
