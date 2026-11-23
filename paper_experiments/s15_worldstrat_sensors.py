@@ -211,11 +211,24 @@ def labels(df, task):
     return y, classes
 
 
-def folds(y, k=5):
-    from sklearn.model_selection import StratifiedKFold
+def sites(aoi):
+    """WorldStrat site of each area: Amnesty and ASMSpotter areas of 22.5 km2 were imaged as 9 adjacent 2.5 km2
+    tiles named <site>-<i>-<j>, which share their surroundings and almost always their labels."""
+    aoi = pd.Series(aoi).astype(str)
+    multi = aoi.str.match(r"^(Amnesty|ASMSpotter)")
+    return np.where(multi, aoi.str.replace(r"-\d+-\d+$", "", regex=True), aoi)
+
+
+def folds(y, groups=None, k=5):
+    """Stratified 5-fold CV; with groups (PE_WS_GROUPED=1, default), the tiles of a site stay in the same fold."""
+    from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
 
     f = np.zeros(len(y), int)
-    for i, (_, te) in enumerate(StratifiedKFold(k, shuffle=True, random_state=0).split(np.zeros(len(y)), y)):
+    if groups is not None and os.environ.get("PE_WS_GROUPED", "1") == "1":
+        it = StratifiedGroupKFold(k, shuffle=True, random_state=0).split(np.zeros(len(y)), y, groups)
+    else:
+        it = StratifiedKFold(k, shuffle=True, random_state=0).split(np.zeros(len(y)), y)
+    for i, (_, te) in enumerate(it):
         f[te] = i
     return f
 
@@ -248,7 +261,7 @@ def heads():
         sel = np.where(ok & (y_all >= 0))[0]
         y = y_all[sel]
         C = len(classes)
-        f = folds(y)
+        f = folds(y, sites(df["AOI"].values[sel]))
         out = res.setdefault(task, {})
         out["classes"], out["counts"] = classes, np.bincount(y, minlength=C).tolist()
         yt = torch.as_tensor(y, device=DEV)
