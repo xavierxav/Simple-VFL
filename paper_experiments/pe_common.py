@@ -29,7 +29,25 @@ def seed_all(seed):
         torch.cuda.manual_seed_all(seed)
 
 
+class PartyLogits(nn.Module):
+    """Few-round variant: one small MLP per party maps its vector to C logits; the label owner adds them with
+    learnable weights. Per training step each party sends C logits and receives their C gradients."""
+
+    def __init__(self, k, d, n_cls, hidden=256):
+        super().__init__()
+        self.k, self.d = k, d
+        self.parties = nn.ModuleList([nn.Sequential(nn.Linear(d, hidden), nn.BatchNorm1d(hidden), nn.ReLU(), nn.Linear(hidden, n_cls)) for _ in range(k)])
+        self.w = nn.Parameter(torch.ones(k))
+
+    def forward(self, x):
+        x = x.view(len(x), self.k, self.d)
+        return sum(self.w[i] * m(x[:, i]) for i, m in enumerate(self.parties))
+
+
 def make_head(arch, in_dim, n_cls, hidden=1000):
+    if arch.startswith("logits"):  # e.g. "logits16": 16 parties
+        k = int(arch[6:])
+        return PartyLogits(k, in_dim // k, n_cls)
     if arch == "linear":
         return nn.Linear(in_dim, n_cls)
     if arch == "mlp2":
@@ -128,7 +146,8 @@ def train_head(
     best, best_state, bad = float("inf"), None, 0
     n = len(Xtr)
     g = torch.Generator(device="cpu").manual_seed(seed)
-    for _ in range(epochs):
+    for ep in range(epochs):
+        model.epochs_run = ep + 1
         model.train()
         perm = torch.randperm(n, generator=g).to(DEV)
         for i in range(0, n, bs):

@@ -73,10 +73,11 @@ def main():
         for i in range(0, len(yte), 128):
             P.append(F.softmax(forward(model, Xte, torch.arange(i, min(len(yte), i + 128))).float(), 1))
         P = torch.cat(P)
+        test.last = P.cpu().numpy()
         return (P.argmax(1) == yte).float().mean().item(), auc_macro_ovr(yte.cpu().numpy(), P.cpu().numpy())
 
-    runs, curves, secs = [], [], []
-    tag = "" if a.scale == "255" else "_std"
+    runs, curves, secs, probs = [], [], [], {}
+    tag = ("" if a.scale == "255" else "_std") + os.environ.get("PE_S8_SUFFIX", "")
     for seed in [int(x) for x in a.seeds.split(",")]:
         seed_all(seed)
         model = SplitResNet().to(DEV).to(memory_format=torch.channels_last)
@@ -107,6 +108,8 @@ def main():
         best = summarize([{"acc": max(c["test_acc"] for c in cv) / 100, "auc": max(c["test_auc"] for c in cv) / 100} for cv in curves])
         save_json(f"vb_repro_splitresnet{tag}.json", {"last_epoch": summarize(runs), "best_epoch_on_test": best, "curves": curves, "secs_per_seed": secs,
                                                       "gpu": torch.cuda.get_device_name(), "scale": a.scale, "published": {"acc": 81.17, "acc_std": 0.35}})
+        probs[f"seed{seed}"] = test.last.astype(np.float32)
+        np.savez_compressed(os.path.join(os.environ.get("PE_OUT", "/content/results"), f"vb_repro_splitresnet{tag}_probs.npz"), y=yte.cpu().numpy(), **probs)
         print("SEED", seed, runs[-1], flush=True)
 
 

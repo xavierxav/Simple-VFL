@@ -182,8 +182,9 @@ def e4(G):
                     A, V, T = comp(A, V, T, seed)
                 if eps is None:
                     return A, V, T
-                C = A.flatten(0, 1).norm(dim=1).median()
-                clip = lambda X: X * (C / X.norm(dim=-1, keepdim=True).clamp_min(C))  # noqa: E731
+                # each party clips with the median norm of its own training vectors (no cross-party statistic)
+                C = A.norm(dim=-1).median(0).values[:, None]  # [16, 1]
+                clip = lambda X: X * (C / X.norm(dim=-1, keepdim=True).clamp_min(1e-12)).clamp(max=1.0)  # noqa: E731
                 sigma = 2 * C / gdp_mu(eps)
                 g = torch.Generator(device=DEV).manual_seed(1000 + seed)
                 return tuple(clip(X) + sigma * torch.randn(X.shape, device=DEV, generator=g) for X in (A, V, T))

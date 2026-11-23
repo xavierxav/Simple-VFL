@@ -210,12 +210,18 @@ def conditions(Ftr):
     def noise(r):  # X: [B,16,D] (p None) or [B,D] uploads of parties p
         return lambda X, p=None, g=None: X + r * (sd if p is None else sd[0, p]) * torch.randn(X.shape, device=DEV, generator=g)
 
-    C = Ftr.flatten(0, 1).norm(dim=1).median().item()
+    Cp = Ftr.norm(dim=-1).median(0).values  # [16]: each party clips with the median norm of its own training vectors
+    C = Cp.mean().item()
 
     def dp(eps):
-        sigma = 2 * C / gdp_mu(eps)
-        clip = lambda X: X * (C / X.norm(dim=-1, keepdim=True).clamp_min(C))  # noqa: E731
-        return (lambda Xtr, Xte: (clip(Xtr), clip(Xte))), (lambda X, p=None, g=None: X + sigma * torch.randn(X.shape, device=DEV, generator=g)), sigma
+        sig = 2 * Cp / gdp_mu(eps)  # [16]
+        clip = lambda X: X * (Cp[None, :, None] / X.norm(dim=-1, keepdim=True).clamp_min(1e-12)).clamp(max=1.0)  # noqa: E731
+
+        def pert(X, p=None, g=None):  # X: [B,16,D] (p None) or [B,D] uploads of parties p
+            s_ = sig[None, :, None] if p is None else sig[p][:, None]
+            return X + s_ * torch.randn(X.shape, device=DEV, generator=g)
+
+        return (lambda Xtr, Xte: (clip(Xtr), clip(Xte))), pert, sig.mean().item()
 
     ident = lambda Xtr, Xte: (Xtr, Xte)  # noqa: E731
     out = {

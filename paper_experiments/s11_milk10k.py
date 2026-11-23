@@ -201,16 +201,17 @@ def split(kinds_list, epochs_of):
     y = les["dx7"].to_numpy()
     F = folds(y)
     parties = [np.load(f"{ROOT}/img_clin.npy"), np.load(f"{ROOT}/img_derm.npy")]
-    path = os.path.join(os.environ.get("PE_OUT", "/content/results"), "milk_split.json")
+    name = os.environ.get("PE_MILK_SPLIT_OUT", "milk_split")
+    path = os.path.join(os.environ.get("PE_OUT", "/content/results"), f"{name}.json")
     res = __import__("json").load(open(path)) if os.path.exists(path) else {}
     for kind in kinds_list:
         if kind in res:
             continue
-        runs, infos = [], []
+        runs, infos, proba = [], [], np.zeros((len(y), 7), np.float32)
         for f, (tr, va, te) in enumerate(F):
             m, info = train_split(parties, y, tr, va, te, [kind, kind], 7, epochs=epochs_of(kind), bs=64, seed=f,
                                   class_weight=class_weights(y[tr], 7), log=lambda s: print(kind, f, s, flush=True))
-            info.pop("test_proba")
+            proba[te] = info.pop("test_proba")
             runs.append(m)
             infos.append(info)
             print(kind, "fold", f, {k: round(v * 100, 2) for k, v in m.items()}, f"{info['secs']:.0f}s", flush=True)
@@ -218,7 +219,8 @@ def split(kinds_list, epochs_of):
         res[kind].update({"secs_per_fold": [i["secs"] for i in infos], "bytes_per_train_sample": infos[0]["bytes_per_train_sample"],
                           "epochs": infos[0]["epochs"], "trainable_params": infos[0]["trainable_params"], "peak_mem_gb": max(i["peak_mem_gb"] for i in infos)})
         print(kind, fmt(res[kind]), flush=True)
-        save_json("milk_split.json", res)
+        save_json(f"{name}.json", res)
+        np.savez_compressed(os.path.join(os.environ.get("PE_OUT", "/content/results"), f"milk_split_oof_{kind}.npz"), y=y, proba=proba)
 
 
 def main():

@@ -32,6 +32,7 @@ from sklearn.metrics import f1_score
 from pe_common import DEV, evaluate_all, fmt, metrics_from_proba, predict_proba, save_json, seed_all, summarize, train_head
 
 ROOT = os.environ.get("PE_WS2", "/content/ws2")
+SUF = os.environ.get("PE_WS_SUFFIX", "")
 OUT = os.environ.get("PE_OUT", "/content/results")
 NIR, SWIR, RGB = [7, 3, 2], [12, 8, 3], [3, 2, 1]
 B2, B10 = 1, 10  # blue, cirrus (L1C order B1..B8, B8A, B9, B10, B11, B12)
@@ -295,7 +296,7 @@ def heads():
         del S2K
         if "S2 centre clear-mean" in P:
             P["S2 3 scales clear-mean"] = np.concatenate([P["S2 clear-mean"], P["S2 centre1k clear-mean"], P["S2 centre clear-mean"]], 1)
-    path = os.path.join(OUT, "ws_fusion.json")
+    path = os.path.join(OUT, f"ws_fusion{SUF}.json")
     res = json.load(open(path)) if os.path.exists(path) else {}
     single = list(P)
     concat = [["SPOT", "S2 mean"], ["SPOT", "S2 median"], ["SPOT", "S2 mean+std"], ["SPOT", "S2 clear-mean"], ["SPOT centre", "S2 centre mean"],
@@ -320,7 +321,7 @@ def heads():
         def record(key, runs):
             out[key] = summarize(runs)
             print(f"{task:5s} {key:46s} {fmt(out[key])}", flush=True)
-            save_json("ws_fusion.json", res)
+            save_json(f"ws_fusion{SUF}.json", res)
 
         probas = {}  # single-party test probabilities per fold, for late fusion and diagnostics
 
@@ -445,7 +446,7 @@ def heads():
                     runs.append(metrics_from_proba(y[te], m(St[te], Pt[te] if Pt is not None else None).softmax(1).cpu().numpy()))
             record(key, runs)
             out[key]["upload_vectors_s2"] = int(S.shape[1])
-    save_json("ws_fusion.json", res)
+    save_json(f"ws_fusion{SUF}.json", res)
 
 
 def main():

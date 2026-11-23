@@ -12,6 +12,7 @@ sends the K party embeddings up and their gradients down (half precision), every
 """
 
 import copy
+import os
 import time
 
 import numpy as np
@@ -34,11 +35,11 @@ def _norm(x, stats):
 
 
 class Bottom(nn.Module):
-    def __init__(self, kind):
+    def __init__(self, kind, stats=None):
         super().__init__()
         self.kind = kind
         base = kind.rsplit("_", 1)[0] if kind.endswith(("_lora", "_ft", "_frozen")) else kind
-        self.stats = CLIPN if base.startswith("clip") else IMAGENET
+        self.stats = stats or (CLIPN if base.startswith("clip") else IMAGENET)
         if base in ("resnet18", "resnet18_in"):
             import torchvision
 
@@ -50,6 +51,8 @@ class Bottom(nn.Module):
 
         m = CLIPVisionModel.from_pretrained(HF[base]) if base.startswith("clip") else AutoModel.from_pretrained(HF[base])
         self.dim, self.vit, self.clip = m.config.hidden_size, True, base.startswith("clip")
+        if kind.endswith(("_lora", "_ft")) and os.environ.get("PE_GC") == "1":
+            m.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         if kind.endswith("_lora"):
             from peft import LoraConfig, get_peft_model
 
@@ -74,9 +77,9 @@ class Bottom(nn.Module):
 
 
 class SplitModel(nn.Module):
-    def __init__(self, kinds, n_cls, hidden=1000):
+    def __init__(self, kinds, n_cls, hidden=1000, stats=None):
         super().__init__()
-        self.bottoms = nn.ModuleList([Bottom(k) for k in kinds])
+        self.bottoms = nn.ModuleList([Bottom(k, stats) for k in kinds])
         d = sum(b.dim for b in self.bottoms)
         self.top = nn.Sequential(nn.Linear(d, hidden), nn.BatchNorm1d(hidden), nn.ReLU(), nn.Linear(hidden, n_cls))
 
@@ -118,12 +121,12 @@ def _predict(model, parties, idx, size, bs):
     return torch.cat(out)
 
 
-def train_split(parties, y, tr, va, te, kinds, n_cls, epochs=20, bs=64, size=None, seed=0, class_weight=None, log=print):
+def train_split(parties, y, tr, va, te, kinds, n_cls, epochs=20, bs=64, size=None, seed=0, class_weight=None, log=print, stats=None):
     """parties: list of uint8 arrays [N,3,h,w] (CPU, indexable); y: int numpy [N]; tr/va/te: index arrays.
     kinds: one backbone name per party.  size: (H,W) fed to the bottoms (None = stored size).
     Returns (test metrics dict, info dict)."""
     seed_all(seed)
-    model = SplitModel(kinds, n_cls).to(DEV).to(memory_format=torch.channels_last)
+    model = SplitModel(kinds, n_cls, stats=stats).to(DEV).to(memory_format=torch.channels_last)
     base = kinds[0]
     groups = []
     for b in model.bottoms:

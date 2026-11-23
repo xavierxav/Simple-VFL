@@ -31,9 +31,10 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from pe_common import DEV, evaluate_all, fmt, robust_download, save_json, summarize, train_head
+from pe_common import DEV, evaluate_all, fmt, predict_proba, robust_download, save_json, summarize, train_head
 
 ROOT = os.environ.get("PE_WS2", "/content/ws2")
+SUF = os.environ.get("PE_WS_SUFFIX", "")  # e.g. "_grouped": new result files next to the old ones
 OUT = os.environ.get("PE_OUT", "/content/results")
 ZEN = "https://zenodo.org/records/6810792/files"
 EXCLUDED = ["ASMSpotter-1-1-1", "Landcover-1062091", "UNHCR-HUNs002665"]
@@ -254,8 +255,9 @@ def heads():
             if s in P:
                 configs[f"SPOT {k} + {s}"] = [f"SPOT {k}", s]
     configs["SPOT CLIP-L + S2 CLIP-L"] = ["SPOT CLIP-L", "S2 CLIP-L"]
-    path = os.path.join(OUT, "ws_sensors.json")
+    path = os.path.join(OUT, f"ws_sensors{SUF}.json")
     res = json.load(open(path)) if os.path.exists(path) else {}
+    oof = {}  # out-of-fold probabilities (float16) of the MLP heads, for per-class scores and paired tests
     for task in ("ipcc", "smod", "lccs"):
         y_all, classes = labels(df, task)
         sel = np.where(ok & (y_all >= 0))[0]
@@ -264,13 +266,15 @@ def heads():
         f = folds(y, sites(df["AOI"].values[sel]))
         out = res.setdefault(task, {})
         out["classes"], out["counts"] = classes, np.bincount(y, minlength=C).tolist()
+        out["grouped_by_site"] = os.environ.get("PE_WS_GROUPED", "1") == "1"
+        oof[f"{task}__y"], oof[f"{task}__sel"], oof[f"{task}__fold"] = y, sel, f
         yt = torch.as_tensor(y, device=DEV)
         for cname, parts in configs.items():
             for arch in ("mlp2", "linear"):
                 key = f"{cname}|{arch}"
                 if key in out or (arch == "linear" and "+" not in cname and cname not in ("SPOT 1.5m", "S2 MS")):
                     continue
-                runs = []
+                runs, pr = [], np.zeros((len(y), C), np.float16)
                 for k in range(5):
                     tr, va, te = np.where((f != k) & (f != (k + 1) % 5))[0], np.where(f == (k + 1) % 5)[0], np.where(f == k)[0]
                     Z = []
@@ -281,14 +285,18 @@ def heads():
                     cnt = np.bincount(y[tr], minlength=C).astype(float)
                     m = train_head(X[tr], yt[tr], X[va], yt[va], C, arch=arch, seed=k, class_weight=(cnt.sum() / (C * np.maximum(cnt, 1))).tolist())
                     runs.append(evaluate_all(m, X[te], yt[te]))
+                    pr[te] = predict_proba(m, X[te]).cpu().numpy()
                 out[key] = summarize(runs)
+                if arch == "mlp2" and ("+" not in cname or "S2 MS" in cname or "CLIP" in cname):
+                    oof[f"{task}__{key}"] = pr
                 print(f"{task:5s} {key:34s} {fmt(out[key])}", flush=True)
-            save_json("ws_sensors.json", res)
+            save_json(f"ws_sensors{SUF}.json", res)
+            np.savez_compressed(os.path.join(OUT, f"ws_sensors_oof{SUF}.npz"), **oof)
         if task == "ipcc":
             for a, b in (("SPOT 1.5m", "S2 MS"), ("SPOT 6m", "S2 MS")):
                 os.makedirs(os.environ.get("PE_HE_DS", "/content/he_ds"), exist_ok=True); np.savez(f"{os.environ.get('PE_HE_DS', '/content/he_ds')}/he_ds_worldstrat_ipcc_{a.split()[1]}_{b.replace(' ', '')}.npz", n_parties=2, p0=P[a][sel].astype(np.float16),
                          p1=P[b][sel].astype(np.float16), y=y, fold=f, metric="f1")
-    save_json("ws_sensors.json", res)
+    save_json(f"ws_sensors{SUF}.json", res)
 
 
 def main():
