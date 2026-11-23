@@ -53,3 +53,10 @@ experiments/
 
 # paper result files (small)
 !paper_results/*.npz
+
+# LaTeX build artifacts of the paper
+paper/src/main.aux
+paper/src/main.bbl
+paper/src/main.blg
+paper/src/main.out
+paper/src/main.pdf
