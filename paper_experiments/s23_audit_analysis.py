@@ -6,7 +6,7 @@ test probabilities of the frozen heads (vb_frozen_probs.npz), of the reproduced 
 training location of every test upload (vb_nnpublic.npz), and the out-of-fold WorldStrat probabilities
 (ws_sensors_oof_grouped.npz).  Writes vb_audit_analysis.json:
   mapping   every VertiBench sample matched to its WorldStrat area by image fingerprints (band means and a 4x4 B4
-            thumbnail of each revisit), with the match margin;
+            thumbnail of each revisit, matched by correlation), with the match score and gap;
   sibling   test samples that are tiles of a multi-tile site whose other tiles are in the training set;
   subsets   accuracy of every kept method on all test samples, on those with a sibling and on the others;
   paired    exact McNemar test and bootstrap interval of each frozen head against the SplitNN reference
@@ -38,34 +38,35 @@ def load(name):
     return dict(np.load(p, allow_pickle=False)) if os.path.exists(p) else None
 
 
-def match(vb, ws, seen=None, k=10, min_margin=1.5):
-    """vb [n,16,29] (train and test together), ws [m,16,29] -> index into ws (-1: no confident match), set distance,
-    margin to the second best area.  Each data set is standardised per dimension as a whole (the two uint8 conversions
-    may differ by a per-band scale); the revisit order may differ, so candidates found on the revisit mean are re-ranked
-    by a set distance over the revisits WorldStrat actually holds.  Areas missing from the WorldStrat arrays (3 of the
-    3,928 are left out by stage 15) must not be forced onto a neighbour: matches with a margin below min_margin are
-    rejected."""
+def match(vb, ws, seen=None, chunk=64, min_score=0.95, min_gap=0.05):
+    """vb [n,16,29] (train and test together), ws [m,16,29] -> index into ws (-1: no confident match), score, gap to
+    the second best area.  VertiBench rescales the brightness of every image (by about 1.7, not uniformly), so band
+    means do not match; the 4x4 B4 thumbnail of each revisit, centred and normalised, does.  Score of a candidate area:
+    mean over the VertiBench revisits of their best correlation with a revisit WorldStrat holds (the revisit order may
+    differ).  Areas missing from the WorldStrat arrays (3 of the 3,928 are left out by stage 15) must not be forced onto
+    a neighbour: matches below min_score or within min_gap of the second best area are rejected."""
     seen = np.ones(ws.shape[:2], bool) if seen is None else seen.astype(bool)
-    def z(a, m):
-        a = a.astype(np.float32)
-        mu, sd = a[m].mean(0), a[m].std(0) + 1e-6
-        return (a - mu) / sd
+
+    def zn(x):
+        x = x - x.mean(-1, keepdims=True)
+        return x / (np.linalg.norm(x, axis=-1, keepdims=True) + 1e-6)
+    V, W = zn(vb[..., 13:].astype(np.float32)), zn(ws[..., 13:].astype(np.float32))
+    m = len(W)
+    Wf = W.reshape(-1, W.shape[-1])
+    mask = np.where(seen.reshape(-1), 0.0, -9.0).astype(np.float32)
     vok = np.abs(vb.astype(np.float32)).sum(-1) > 0  # revisits absent from VertiBench too (all-zero images) are ignored
-    V, W = z(vb, vok), z(ws, seen)
-    W[~seen] = np.inf
-    vm = np.stack([V[i][vok[i]].mean(0) if vok[i].any() else V[i].mean(0) for i in range(len(V))])
-    wm = np.stack([W[j][seen[j]].mean(0) if seen[j].any() else np.full(W.shape[-1], 1e6, np.float32) for j in range(len(W))])
-    d = ((vm[:, None] - wm[None]) ** 2).sum(-1) if len(V) * len(W) < 4e7 else None
-    idx, dist, marg = np.zeros(len(V), int), np.zeros(len(V)), np.zeros(len(V))
-    for i in range(len(V)):
-        di = d[i] if d is not None else ((vm[i] - wm) ** 2).sum(-1)
-        cand = np.argsort(di)[:k]
-        vi = V[i][vok[i]] if vok[i].any() else V[i]
-        sd = [np.sqrt(((vi[:, None] - W[c][None]) ** 2).sum(-1)).min(1).mean() for c in cand]
-        o = np.argsort(sd)
-        idx[i], dist[i], marg[i] = cand[o[0]], sd[o[0]], sd[o[1]] / max(sd[o[0]], 1e-9)
-    idx[marg < min_margin] = -1
-    return idx, dist, marg
+    idx, score, gap = np.zeros(len(V), int), np.zeros(len(V)), np.zeros(len(V))
+    for a in range(0, len(V), chunk):
+        Vb = V[a : a + chunk]
+        S = (Vb.reshape(-1, Vb.shape[-1]) @ Wf.T + mask).reshape(len(Vb), 16, m, 16).max(-1)  # [b,16 revisits,m]
+        ok = vok[a : a + chunk][:, :, None]
+        S = (S * ok).sum(1) / np.maximum(ok.sum(1), 1)  # [b,m]
+        top = np.argsort(-S, 1)[:, :2]
+        r = np.arange(len(Vb))
+        idx[a : a + len(Vb)], score[a : a + len(Vb)] = top[:, 0], S[r, top[:, 0]]
+        gap[a : a + len(Vb)] = S[r, top[:, 0]] - S[r, top[:, 1]]
+    idx[(score < min_score) | (gap < min_gap)] = -1
+    return idx, score, gap
 
 
 def acc_ci(c):
@@ -118,8 +119,8 @@ def main():
                           "n_test": int(len(ite)), "unmatched_train": int((itr < 0).sum()), "unmatched_test": int((ite < 0).sum()),
                           "provider_mismatch": int(bad.sum()), "label_to_provider": {int(k): v for k, v in maj.items()},
                           "train_test_same_area": int(len(utr & ute)), "duplicate_matches": int(ok.sum() - len(set(ia[ia >= 0]))),
-                          "margin_median": float(np.median(ma)), "margin_p5": float(np.percentile(ma, 5)),
-                          "dist_median": float(np.median(da[ia >= 0]))}
+                          "score_median": float(np.median(da)), "gap_median": float(np.median(ma)),
+                          "gap_p5": float(np.percentile(ma[ia >= 0], 5)), "score_p5": float(np.percentile(da[ia >= 0], 5))}
         tr_sites = set(site[list(utr)])
         sib_te = np.array([j >= 0 and multi[j] and site[j] in tr_sites for j in ite])
         res["sibling"] = {"test_multi_tile": int(sum(multi[j] for j in ite if j >= 0)), "test_with_train_sibling": int(sib_te.sum()),
