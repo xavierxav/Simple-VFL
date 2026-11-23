@@ -60,3 +60,5 @@ paper/src/main.bbl
 paper/src/main.blg
 paper/src/main.out
 paper/src/main.pdf
+paper/src/main.fdb_latexmk
+paper/src/main.fls
