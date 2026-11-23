@@ -32,6 +32,8 @@ models the forward pass sends 4-d logits and the backward pass returns 4-d logit
 gradients. Raw images never leave the party. No secure aggregation, DP or
 encryption is implemented.
 
+> **Historical numbers.** The figures in this file come from the original 2024 pipeline (float32 features, its own preprocessing). The paper in `paper/` re-runs every experiment with `paper_experiments/` at the encoders' native 224 px with float16 uploads (VertiBench: DINOv2-g 84.2 %, CLIP-L 85.2 %, reproduced SplitNN 81.1 %); its tables are generated from `paper_results/`.
+
 | VertiBench setting | Parties/views | Input bands | Accuracy | AUC |
 |---|---:|---|---:|---:|
 | SplitNN reported by VertiBench | 16 views | 13 | 81.17 ± 0.35 | — |

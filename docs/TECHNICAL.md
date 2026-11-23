@@ -68,7 +68,7 @@ SplitNN-like.
 
 ## Communication budget
 
-One-time feature-upload payload per sample, float32, before protocol overhead:
+One-time feature-upload payload per sample, float32 as in the original 2024 pipeline, before protocol overhead (the paper counts float16 uploads, half these sizes):
 
 | Payload | Size |
 |---|---:|

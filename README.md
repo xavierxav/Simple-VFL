@@ -119,6 +119,8 @@ provider-name labels: on IPCC, the one-shot 16-view Sentinel model reaches
 
 ## Results at a glance
 
+> **Historical numbers.** The figures in this section and above come from the original 2024 pipeline (float32 features, its own preprocessing). The paper in `paper/` re-runs every experiment with `paper_experiments/` at the encoders' native 224 px with float16 uploads (VertiBench: DINOv2-g 84.2 %, CLIP-L 85.2 %, reproduced SplitNN 81.1 %); its tables are generated from `paper_results/`.
+
 | Experiment | Result | Comparison |
 |---|---:|---|
 | VertiBench, one-shot frozen DINOv2 + central MLP | **82.47 ± 0.70% accuracy** / 95.08 ± 0.17 AUC | Published SplitNN 81.17 ± 0.35% on 13 bands; our run uses 3 RGB bands (5 seeds) |
