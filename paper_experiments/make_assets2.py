@@ -92,11 +92,15 @@ if _v2:  # revised attacker (second review): shared deconvolutional decoder + li
     for _part in ("single", "ridge"):
         for _k, _v in ((_dp or {}).get(_part) or {}).items():
             _v2.setdefault(_part, {})[_k] = _v
+            inv1.get(_part, {}).pop(_k, None)  # the first attacker ran on the old (pooled) clipping: drop its DP rows
     inv = _v2
     for _f, _pca in (("vb224_inversion_v2_examples.npz", False), ("vb224_inversion_v2b_examples.npz", True)):
         if os.path.exists(os.path.join(RES, _f)):
             _z = np.load(os.path.join(RES, _f))
             INV_NPZ.update({k: _z[k] for k in _z.files if ("PCA" in k) == _pca or k in ("original", "nearest_neighbour")})
+    if _dp and os.path.exists(os.path.join(RES, "vb224_inversion_v2dp_examples.npz")):
+        _z = np.load(os.path.join(RES, "vb224_inversion_v2dp_examples.npz"))
+        INV_NPZ.update({k: _z[k] for k in _z.files if "DP" in k})
 elif os.path.exists(os.path.join(RES, "vb224_inversion_examples.npz")):
     _z = np.load(os.path.join(RES, "vb224_inversion_examples.npz"))
     INV_NPZ = {k: _z[k] for k in _z.files}
@@ -178,12 +182,13 @@ if lg:
     for k, v in sorted(lg, key=lambda kv: ["clip_l14_224", "dinov2_g_224", "clip_b16_224"].index(kv[0]) if kv[0] in ("clip_l14_224", "dinov2_g_224", "clip_b16_224") else 9):
         c = cost.get(k, {})
         gf = c.get("flops_per_image")
-        rows.append(row(NAME[k], 3, size(v["bytes_per_train_sample"]), gf / 1e9 if gf else None,
+        up = np.mean(v["epochs_run"]) * 2 * K * 4 * 2  # training passes only, as for split learning: 4 logits up, 4 gradients down, fp16
+        rows.append(row(NAME[k], 3, size(up), gf / 1e9 if gf else None,
                         c.get("extract_secs_all_images") / 60 if c.get("extract_secs_all_images") else None, v))
         t = {"clip_l14_224": "Clip", "dinov2_g_224": "G", "clip_b16_224": "ClipB"}.get(k, k)
         macro(f"lg{t}Acc", f1(v["acc"]))
         macro(f"lg{t}Fone", f1(v["f1"]))
-        macro(f"lg{t}Up", size(v["bytes_per_train_sample"]))
+        macro(f"lg{t}Up", size(up))
         macro(f"lg{t}Ep", f"{np.median(v['epochs_run']):.0f}")
         m2 = aud["heads"].get(f"{k}|mlp2")
         if m2:
@@ -1132,7 +1137,8 @@ for task in ("ipcc", "lccs"):
     a, bb = cfg.get("SPOT 1.5m|mlp2"), cfg.get("SPOT 1.5m + S2 MS|mlp2")
     if a and bb:
         gains = sorted(zip(np.array(bb) - np.array(a), e["classes"], e["counts"]), reverse=True)
-        macro(f"wc{task.capitalize()}Top", ", ".join(f"{c} ({g:+.0f}, {n} areas)" for g, c, n in gains[:3]))
+        tex = lambda c: c.replace("\u2010", "-").replace("%", "\\%").replace("&", "\\&")  # noqa: E731
+        macro(f"wc{task.capitalize()}Top", ", ".join(f"{tex(c)} ({g:+.0f}, {n} areas)" for g, c, n in gains[:3]))
         macro(f"wc{task.capitalize()}Neg", str(int(sum(g < 0 for g, _, _ in gains))))
 
 # ------------------------------------------------------------------ placeholders, so that the paper compiles on partial results

@@ -257,7 +257,8 @@ def heads():
     configs["SPOT CLIP-L + S2 CLIP-L"] = ["SPOT CLIP-L", "S2 CLIP-L"]
     path = os.path.join(OUT, f"ws_sensors{SUF}.json")
     res = json.load(open(path)) if os.path.exists(path) else {}
-    oof = {}  # out-of-fold probabilities (float16) of the MLP heads, for per-class scores and paired tests
+    oof_path = os.path.join(OUT, f"ws_sensors_oof{SUF}.npz")  # out-of-fold probabilities (float16) of the MLP heads,
+    oof = dict(np.load(oof_path)) if os.path.exists(oof_path) else {}  # for per-class scores; kept when resuming
     for task in ("ipcc", "smod", "lccs"):
         y_all, classes = labels(df, task)
         sel = np.where(ok & (y_all >= 0))[0]

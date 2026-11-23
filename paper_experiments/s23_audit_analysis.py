@@ -38,23 +38,33 @@ def load(name):
     return dict(np.load(p, allow_pickle=False)) if os.path.exists(p) else None
 
 
-def match(vb, ws, k=10):
-    """vb [n,16,29], ws [m,16,29] -> index into ws, set distance, margin to the second best area.
-    Each data set is standardised per dimension separately (the two uint8 conversions may differ by a per-band scale);
-    the revisit order may differ, so candidates found on the revisit mean are re-ranked by a set distance."""
-    def z(a):
+def match(vb, ws, seen=None, k=10, min_margin=1.5):
+    """vb [n,16,29] (train and test together), ws [m,16,29] -> index into ws (-1: no confident match), set distance,
+    margin to the second best area.  Each data set is standardised per dimension as a whole (the two uint8 conversions
+    may differ by a per-band scale); the revisit order may differ, so candidates found on the revisit mean are re-ranked
+    by a set distance over the revisits WorldStrat actually holds.  Areas missing from the WorldStrat arrays (3 of the
+    3,928 are left out by stage 15) must not be forced onto a neighbour: matches with a margin below min_margin are
+    rejected."""
+    seen = np.ones(ws.shape[:2], bool) if seen is None else seen.astype(bool)
+    def z(a, m):
         a = a.astype(np.float32)
-        return (a - a.mean((0, 1))) / (a.std((0, 1)) + 1e-6)
-    V, W = z(vb), z(ws)
-    vm, wm = V.mean(1), W.mean(1)
+        mu, sd = a[m].mean(0), a[m].std(0) + 1e-6
+        return (a - mu) / sd
+    vok = np.abs(vb.astype(np.float32)).sum(-1) > 0  # revisits absent from VertiBench too (all-zero images) are ignored
+    V, W = z(vb, vok), z(ws, seen)
+    W[~seen] = np.inf
+    vm = np.stack([V[i][vok[i]].mean(0) if vok[i].any() else V[i].mean(0) for i in range(len(V))])
+    wm = np.stack([W[j][seen[j]].mean(0) if seen[j].any() else np.full(W.shape[-1], 1e6, np.float32) for j in range(len(W))])
     d = ((vm[:, None] - wm[None]) ** 2).sum(-1) if len(V) * len(W) < 4e7 else None
     idx, dist, marg = np.zeros(len(V), int), np.zeros(len(V)), np.zeros(len(V))
     for i in range(len(V)):
         di = d[i] if d is not None else ((vm[i] - wm) ** 2).sum(-1)
         cand = np.argsort(di)[:k]
-        sd = [np.sqrt(((V[i][:, None] - W[c][None]) ** 2).sum(-1)).min(1).mean() for c in cand]
+        vi = V[i][vok[i]] if vok[i].any() else V[i]
+        sd = [np.sqrt(((vi[:, None] - W[c][None]) ** 2).sum(-1)).min(1).mean() for c in cand]
         o = np.argsort(sd)
         idx[i], dist[i], marg[i] = cand[o[0]], sd[o[0]], sd[o[1]] / max(sd[o[0]], 1e-9)
+    idx[marg < min_margin] = -1
     return idx, dist, marg
 
 
@@ -92,16 +102,28 @@ def main():
         aoi = pd.read_csv(aoi_path)["AOI"].values
         site, multi = sites(aoi)
         W = wfp["fp"]
-        itr, dtr, mtr = match(vfp["train"], W)
-        ite, dte, mte = match(vfp["test"], W)
-        res["mapping"] = {"train_unique": int(len(set(itr))), "test_unique": int(len(set(ite))), "n_train": int(len(itr)),
-                          "n_test": int(len(ite)), "train_test_same_area": int(len(set(itr) & set(ite))),
-                          "margin_median": float(np.median(np.r_[mtr, mte])), "margin_p5": float(np.percentile(np.r_[mtr, mte], 5)),
-                          "dist_median": float(np.median(np.r_[dtr, dte]))}
-        tr_sites = set(site[itr])
-        sib_te = np.array([multi[j] and site[j] in tr_sites for j in ite])
-        res["sibling"] = {"test_multi_tile": int(multi[ite].sum()), "test_with_train_sibling": int(sib_te.sum()),
-                          "share": float(sib_te.mean() * 100), "train_multi_tile": int(multi[itr].sum()),
+        ntr = len(vfp["train"])
+        ia, da, ma = match(np.concatenate([vfp["train"], vfp["test"]]), W, wfp.get("seen"))
+        # the VertiBench label is the provider: a match whose provider disagrees with the majority provider of its
+        # label is rejected as well
+        prov = np.array([a.split("-")[0].split(" ")[0] for a in aoi])
+        ya = np.concatenate([vfp["y_train"], vfp["y_test"]])
+        ok = ia >= 0
+        maj = {c: pd.Series(prov[ia[ok & (ya == c)]]).mode().iloc[0] for c in np.unique(ya[ok])}
+        bad = ok & np.array([maj.get(c) != (prov[j] if j >= 0 else None) for c, j in zip(ya, ia)])
+        ia[bad] = -1
+        itr, ite, mtr, mte = ia[:ntr], ia[ntr:], ma[:ntr], ma[ntr:]
+        utr, ute = set(itr[itr >= 0]), set(ite[ite >= 0])
+        res["mapping"] = {"train_unique": int(len(utr)), "test_unique": int(len(ute)), "n_train": int(ntr),
+                          "n_test": int(len(ite)), "unmatched_train": int((itr < 0).sum()), "unmatched_test": int((ite < 0).sum()),
+                          "provider_mismatch": int(bad.sum()), "label_to_provider": {int(k): v for k, v in maj.items()},
+                          "train_test_same_area": int(len(utr & ute)), "duplicate_matches": int(ok.sum() - len(set(ia[ia >= 0]))),
+                          "margin_median": float(np.median(ma)), "margin_p5": float(np.percentile(ma, 5)),
+                          "dist_median": float(np.median(da[ia >= 0]))}
+        tr_sites = set(site[list(utr)])
+        sib_te = np.array([j >= 0 and multi[j] and site[j] in tr_sites for j in ite])
+        res["sibling"] = {"test_multi_tile": int(sum(multi[j] for j in ite if j >= 0)), "test_with_train_sibling": int(sib_te.sum()),
+                          "share": float(sib_te.mean() * 100), "train_multi_tile": int(sum(multi[j] for j in itr if j >= 0)),
                           "test_label_counts_sibling": np.bincount(vfp["y_test"][sib_te], minlength=4).tolist()}
         np.savez_compressed(os.path.join(R, "vb_ws_mapping.npz"), train=itr, test=ite, sibling_test=sib_te)
         print("mapping", res["mapping"], "\nsibling", res["sibling"])
@@ -126,11 +148,16 @@ def main():
     if methods:
         res["subsets"] = {}
         for m, P in methods.items():
-            c = P.mean(0).argmax(1) == y
-            per_seed = [(p.argmax(1) == y).mean() * 100 for p in P]
-            e = {"seeds": len(P), "acc_mean_of_seeds": float(np.mean(per_seed)), "all": acc_ci(c)}
+            C_ = P.argmax(2) == y[None]  # [seeds, n]: accuracies are means over seeds, as in the tables
+            def sub(mask):
+                r = acc_ci(C_[:, mask].mean(0))
+                r["acc"] = float(C_[:, mask].mean() * 100)
+                r["acc_std"] = float(C_[:, mask].mean(1).std(ddof=1) * 100) if len(C_) > 1 else 0.0
+                r["acc_ensemble"] = float((P[:, mask].mean(0).argmax(1) == y[mask]).mean() * 100)
+                return r
+            e = {"seeds": len(P), "all": sub(np.ones(len(y), bool))}
             if sib_te is not None:
-                e["sibling"], e["no_sibling"] = acc_ci(c[sib_te]), acc_ci(c[~sib_te])
+                e["sibling"], e["no_sibling"] = sub(sib_te), sub(~sib_te)
             res["subsets"][m] = e
             print(f"{m:45s}", {k: (v["acc"] if isinstance(v, dict) else v) for k, v in e.items()})
         ref = methods.get("SplitNN VertiBench recipe")
@@ -139,9 +166,11 @@ def main():
             for m, P in methods.items():
                 if m.startswith("SplitNN"):
                     continue
-                res["paired"][m] = {"all": paired(P.mean(0), ref.mean(0), y)}
+                n = min(len(P), len(ref))  # same number of seeds on both sides of the seed-averaged comparison
+                a, b = P[:n].mean(0), ref[:n].mean(0)
+                res["paired"][m] = {"seeds": n, "all": paired(a, b, y)}
                 if sib_te is not None:
-                    res["paired"][m]["no_sibling"] = paired(P.mean(0)[~sib_te], ref.mean(0)[~sib_te], y[~sib_te])
+                    res["paired"][m]["no_sibling"] = paired(a[~sib_te], b[~sib_te], y[~sib_te])
                 print("paired vs SplitNN", m, res["paired"][m]["all"])
 
     nn = load("vb_nnpublic.npz")
@@ -150,8 +179,8 @@ def main():
         lm = ytr[loc] == yte[:, None]  # [785,16]
         e = {"label_match_all": float(lm.mean() * 100)}
         if sib_te is not None:
-            site_tr = site[itr]
-            nn_sib = np.array([[multi[ite[i]] and site_tr[loc[i, p]] == site[ite[i]] for p in range(16)] for i in range(len(ite))])
+            nn_sib = np.array([[ite[i] >= 0 and itr[loc[i, p]] >= 0 and multi[ite[i]] and site[itr[loc[i, p]]] == site[ite[i]]
+                                for p in range(16)] for i in range(len(ite))])
             e.update({"nn_is_sibling_given_sibling": float(nn_sib[sib_te].mean() * 100),
                       "label_match_sibling": float(lm[sib_te].mean() * 100), "label_match_no_sibling": float(lm[~sib_te].mean() * 100)})
         res["nnpublic"] = e
