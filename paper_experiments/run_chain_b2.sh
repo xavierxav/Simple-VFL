@@ -17,6 +17,7 @@ URL=https://huggingface.co/datasets/xavvierxav/L1C_dataset/resolve/main/Vertiben
 which aria2c > /dev/null || apt-get install -y -q aria2 > /dev/null 2>&1
 which 7z > /dev/null || apt-get install -y -q p7zip-full > /dev/null 2>&1
 pip install -q torchgeo peft > /dev/null 2>&1
+pip uninstall -y -q torchao > /dev/null 2>&1  # recent peft refuses the torchao of the Colab image (not needed here)
 for i in $(seq 1 30); do
   [ -f /content/vb_raw/Vertibench.7z ] && [ ! -f /content/vb_raw/Vertibench.7z.aria2 ] && break
   aria2c -q -x 16 -s 16 -k 8M -c --max-tries=50 --retry-wait=3 --timeout=30 --file-allocation=none \
