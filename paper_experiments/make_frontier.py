@@ -191,16 +191,24 @@ SN_TEXT = "4 x K x 512 x epochs (512-d fp16 activations up, gradients down, ever
 # ------------------------------------------------------------------ VertiBench: split learning (tab_main)
 add(VB, "SplitNN, published (ResNet-18, 13 bands)", "nf_split", None, "acc", 4 * K * 512 * 50, 50, "full ResNet-18 bottom", "activations + gradients",
     "make_assets2.py (hard-coded, wu2024vertibench)", table="tab_main.tex", mean=81.2, std=0.4, label="SplitNN (published)",
-    cost_note=SN_TEXT + "; literature number, left out of the Pareto set and the figure (our reproduction below is plotted)", in_set=False)
+    cost_note=SN_TEXT + "; literature number, left out of the Pareto set and the figure (our reproduction below is plotted)", in_set=False,
+    msgs=msgs_split(50, n_batches(N_TR, BS_REPRO), val=False), msgs_rule=f"50 epochs x {n_batches(N_TR, BS_REPRO)} batches of {BS_REPRO} x 2 (s8 recipe)",
+    gflops=3 * GF["vertibench_resnet18_bottom_158px"] * 50, gflops_rule="3 x forward x 50 epochs (tab_main)")
 if rep:
+    nb = n_batches(N_TR, BS_REPRO)  # s8: the whole official training set, batch 32, no validation pass (last epoch is tested)
     add(VB, "SplitNN, VertiBench recipe (ResNet-18, 13 bands)", "nf_split", rep["last_epoch"], "acc", 4 * K * 512 * 50, 50, "full ResNet-18 bottom",
-        "activations + gradients", "vb_repro_splitresnet.json:last_epoch", table="tab_main.tex", cost_note=SN_TEXT, label="SplitNN")
+        "activations + gradients", "vb_repro_splitresnet.json:last_epoch", table="tab_main.tex", cost_note=SN_TEXT, label="SplitNN",
+        msgs=msgs_split(50, nb, val=False), msgs_rule=f"50 epochs x {nb} batches of {BS_REPRO} x 2 (s8, no validation pass)",
+        gflops=3 * GF["vertibench_resnet18_bottom_158px"] * 50, gflops_rule="3 x forward x 50 epochs (tab_main)")
 for k, lab in (("splitnn_all", "SplitNN, our recipe, scratch (13 bands)"), ("splitnn_rgb", "SplitNN, our recipe, scratch (RGB)"),
                ("splitnn_rgb_pt", "SplitNN, our recipe, ImageNet init. (RGB)")):
     b = base[k]
     if b:
+        nb, fk = n_batches(N_TR_H, b["batch_size"]), "splitnn_bottom_13band_158px" if k == "splitnn_all" else "splitnn_bottom_rgb_158px"
         add(VB, lab, "nf_split", b["summary"], "acc", 4 * K * 512 * b["epochs"], b["epochs"], "full ResNet-18 bottom", "activations + gradients",
-            f"baseline_{k}.json:summary", table="tab_main.tex", cost_note=SN_TEXT)
+            f"baseline_{k}.json:summary", table="tab_main.tex", cost_note=SN_TEXT, msgs=msgs_split(b["epochs"], nb),
+            msgs_rule=f"{b['epochs']} epochs x ({nb} batches of {b['batch_size']} x 2 + 1 validation pass) (s3)",
+            gflops=3 * GF[fk] * b["epochs"] if fk in GF else None, gflops_rule=f"3 x forward x epochs, forward of {fk} (frontier_flops.json, s25)")
 for k, fam in (("clip_b16_lora", "fm_split_lora"), ("clip_b16_frozen", "fm_split_frozen")):
     s = clipb.get(k, {})
     if not s.get("summary"):
@@ -209,25 +217,40 @@ for k, fam in (("clip_b16_lora", "fm_split_lora"), ("clip_b16_frozen", "fm_split
     tr_bytes = np.mean([i["bytes_per_train_sample"] for i in s["infos"]]) * 2 * E * N_TR_H / (2 * E * N_TR_H + E * N_VA_H + N_TE)
     if k.endswith("frozen"):  # frozen bottoms need no gradients: one augmented upload per epoch
         tr_bytes /= 2
+    nb = n_batches(N_TR_H, BS_CLIPB)
     add(VB, f"CLIP-B bottoms, {'LoRA' if 'lora' in k else 'frozen'} (split)", fam, s["summary"], "acc", tr_bytes, E,
         "LoRA adapters (r=16)" if "lora" in k else "none", "activations + gradients" if "lora" in k else "activations (augmented views)",
         f"vb_split_clipb.json:{k}.summary", table="tab_main.tex", encoder="CLIP ViT-B/16",
-        cost_note="mean(bytes_per_train_sample) x training share of the passes, as tab_main" + ("; halved: no gradients" if "frozen" in k else ""))
+        cost_note="mean(bytes_per_train_sample) x training share of the passes, as tab_main" + ("; halved: no gradients" if "frozen" in k else ""),
+        msgs=msgs_split(E, nb, grads="lora" in k),
+        msgs_rule=f"{E} epochs x ({nb} batches of {BS_CLIPB} x {2 if 'lora' in k else 1} + 1 validation pass) (s22 / pe_split)"
+        + ("" if "lora" in k else "; frozen bottoms do not depend on the server: could be one message"),
+        gflops=(3 if "lora" in k else 1) * GF["clip_b16_224"] * E, gflops_rule=f"{'3 x' if 'lora' in k else '1 x'} forward x epochs (tab_main)")
 # few rounds: four logits per party (tab_main)
 for kk, v in aud.get("heads", {}).items():
     k, h = kk.split("|")
     if not h.startswith("logits"):
         continue
     up = np.mean(v["epochs_run"]) * 2 * K * 4 * 2  # training passes only, as for split learning: 4 logits up, 4 gradients down, fp16
-    add(VB, f"{NAME[k]}, 4-logit MLP per party", "fm_logits", v, "acc", up, float(np.mean(v["epochs_run"])), "party MLP head on frozen features",
+    nb, Em = n_batches(N_TR_H, BS_HEAD), float(np.mean(v["epochs_run"]))
+    add(VB, f"{NAME[k]}, 4-logit MLP per party", "fm_logits", v, "acc", up, Em, "party MLP head on frozen features",
         "logits + gradients", f"vb_audit.json:heads.{kk}", table="tab_main.tex", encoder=NAME[k],
-        cost_note="mean(epochs_run) x 2 x K x 4 x 2 (4 fp16 logits up, 4 gradients down per epoch), as tab_main")
+        cost_note="mean(epochs_run) x 2 x K x 4 x 2 (4 fp16 logits up, 4 gradients down per epoch), as tab_main",
+        msgs=msgs_split(Em, nb), msgs_rule=f"mean(epochs_run) x ({nb} batches of {BS_HEAD} x 2 + 1 validation pass) (train_head)",
+        gflops=GF[k] + 6 * v["params"] / K * Em / 1e9, cacheable=True,
+        gflops_rule="encoder forward (tab_main) + party MLP training, 6 x params / K x mean(epochs_run)")
 # one-shot, party-side self-supervised training (tab_main)
 for k, lab in (("nat_all", "FedOnce, Noise As Targets (13 bands)"), ("ssl_all", "FedOnce, SimCLR (13 bands)"), ("ssl_rgb", "FedOnce, SimCLR (RGB)")):
     b = base[k]
     if b:
+        # party-side SimCLR / NAT pre-training on all its training images (s3.run_ssl): epochs x views x 3 x forward on 128 px crops, full
+        # batches only, then one forward pass on the whole 158 px image for the upload
+        tg = {"nat_all": "nat_13band", "ssl_all": "13band", "ssl_rgb": "rgb"}[k]
+        ft, ff, views = GF.get(f"fedonce_{tg}_train_128px"), GF.get(f"fedonce_{tg}_feat_158px"), 1 if k.startswith("nat") else 2
+        g = b["epochs"] * views * 3 * ft * (N_TR // b["batch_size"] * b["batch_size"]) / N_TR + ff if ft and ff else None
         add(VB, lab, "nf_ssl", b["summary"], "acc", K * b.get("feature_dim", 512) * 2, 1, "local SSL pre-training (no interaction)",
-            "plain features (local SSL encoder)", f"baseline_{k}.json:summary", table="tab_main.tex", cost_note="K x feature_dim x 2 (fp16), as tab_main")
+            "plain features (local SSL encoder)", f"baseline_{k}.json:summary", table="tab_main.tex", cost_note="K x feature_dim x 2 (fp16), as tab_main",
+            gflops=g, gflops_rule=f"{b['epochs']} epochs x {views} view(s) x 3 x forward (128 px) x full-batch share + 1 forward (158 px); s25 FLOPs")
 # one-shot, frozen features (tab_main, tab_encoders)
 for k in ("dinov2_g_224", "clip_l14_224", "dinov2_l_224", "dinov2_b_224", "dinov2_s_224", "clip_b16_224", "siglip_b16_224", "resnet50_in1k_224",
           "dinov2_b_random_224", "ssl4eo_s2_vits16"):
@@ -240,14 +263,16 @@ for k in ("dinov2_g_224", "clip_l14_224", "dinov2_l_224", "dinov2_b_224", "dinov
     nf = k in ("resnet50_in1k_224", "dinov2_b_random_224")
     add(VB, f"{NAME[k]}, frozen, one upload", "nf_frozen" if nf else "fm_oneshot", h["mlp2"], "acc", K * h["dim"] * 2, 1, "none", "plain features", src,
         table="tab_main.tex" if k in ("dinov2_g_224", "clip_l14_224", "dinov2_b_224", "clip_b16_224", "ssl4eo_s2_vits16") else "tab_encoders.tex",
-        encoder=NAME[k], cost_note="K x dim x 2 (fp16), as tab_main")
+        encoder=NAME[k], cost_note="K x dim x 2 (fp16), as tab_main", gflops=GF.get(k), cacheable=True,
+        gflops_rule="one forward pass (vb224_encoders.json cost)" if k in GF else "no FLOPs recorded")
 for k, v in combo.items():  # two encoders per party (tab_combo_enc)
     names = k.split("+")
     if len(names) < 2:
         continue
     add(VB, " + ".join(NAME[n] for n in names) + ", frozen, one upload", "fm_oneshot", v["mlp2"], "acc", K * v["dim"] * 2, 1, "none", "plain features",
         f"vb224_combo.json:{k}.mlp2", table="tab_combo_enc.tex", encoder=" + ".join(NAME[n] for n in names),
-        cost_note="K x (d1 + d2) x 2 (fp16), same rule as tab_main")
+        cost_note="K x (d1 + d2) x 2 (fp16), same rule as tab_main", gflops=sum(GF[n] for n in names), cacheable=True,
+        gflops_rule="sum of the two forward passes (as tab_combo_enc)")
 # one-shot, PCA-k x b bits, validation-selected (E7_pareto_val, tab_pareto)
 par = Eg.get("E7_pareto_val") if isinstance(Eg.get("E7_pareto_val"), list) else []
 sel = set()
@@ -258,7 +283,8 @@ for p in sorted(par, key=lambda p: (-p["d"], -p["bits"])):
     vs = (p["d"], p["bits"]) in sel
     add(VB, f"DINOv2-g, {'PCA-' + str(p['d']) if p['d'] < D else 'full'}, {p['bits']}-bit", "fm_pca", p, "acc", p["bytes_per_sample"], 1, "none",
         "compressed features", f"vb224_controls_dinov2_g.json:E7_pareto_val[d={p['d']},bits={p['bits']}]", table="tab_pareto.tex", encoder="DINOv2-g",
-        cost_note="bytes_per_sample of the JSON (K x d x bits / 8), as tab_pareto", in_set=vs, val_selected=vs)
+        cost_note="bytes_per_sample of the JSON (K x d x bits / 8), as tab_pareto", in_set=vs, val_selected=vs, gflops=GF["dinov2_g_224"], cacheable=True,
+        gflops_rule="DINOv2-g forward (PCA projection and quantisation: < 0.01 GFLOPs, not counted)")
 # DP upload (E4_dp, clipping norm per party; tab_privacy for the full features, macros dp* for PCA)
 for r in Eg.get("E4_dp") or []:
     if not r["eps_upload"]:
@@ -267,7 +293,7 @@ for r in Eg.get("E4_dp") or []:
     add(VB, f"DINOv2-g, {'PCA-' + str(r['d']) if r['d'] < D else 'full'}, DP eps={r['eps_upload']} per upload", "fm_dp", r, "acc", 16 * r["d"] * 2, 1,
         "none", "DP-noised features", f"vb224_controls_dinov2_g_dp.json:E4_dp[d={r['d']},eps={r['eps_upload']}]",
         table="tab_privacy.tex" if r["d"] == D and r["eps_upload"] in (64, 8) else None, macros=((f"dp{tag}", f"{r['acc']:.1f}"),), encoder="DINOv2-g",
-        cost_note="16 x d x 2 (fp16), as tab_privacy")
+        cost_note="16 x d x 2 (fp16), as tab_privacy", gflops=GF["dinov2_g_224"], cacheable=True, gflops_rule="DINOv2-g forward (clipping, noise: negligible)")
 hc = he.get("he_cost", {})
 
 
@@ -299,9 +325,11 @@ for ek, et in (("dinov2_g_224", "G"), ("clip_l14_224", "C")):
         s = r.get(pk, {}).get("ridge")
         nb, note, extra = he_bytes("vertibench", "dinov2_g_224", d, False, ek)
         if s and nb:
-            add(VB, f"{NAME[ek]}, PCA-{d}, ridge trained under CKKS", "fm_he", s, "acc", nb, 2, "none", "ciphertexts (CKKS)",
+            add(VB, f"{NAME[ek]}, PCA-{d}, ridge trained under CKKS", "fm_he", s, "acc", nb, 1, "none", "ciphertexts (CKKS)",
                 f"he_heads.json:vertibench/{ek}.{pk}.ridge", table="tab_he.tex", macros=((f"heVb{et}Ridge{tg}", f"{s['acc']:.1f}"),), encoder=NAME[ek],
-                cost_note=note + "; accuracy emulated in plaintext", extra_bytes=extra)
+                cost_note=note + "; accuracy emulated in plaintext", extra_bytes=extra, msgs=5,
+                msgs_rule="1 encrypted upload + 2 x decryption round trip (aggregates, validation scores); key generation not counted",
+                gflops=GF[ek], cacheable=True, gflops_rule="encoder forward; CKKS encryption is not counted in FLOPs (he_cost: seconds)")
 
 # ------------------------------------------------------------------ MILK10k (clinical + dermoscopic parties; tab_freeze, tab_he)
 for k, fam, lab in (("resnet18", "nf_split", "ResNet-18, scratch (split)"), ("resnet18_in", "nf_split", "ResNet-18, ImageNet (split)"),
@@ -312,30 +340,39 @@ for k, fam, lab in (("resnet18", "nf_split", "ResNet-18, scratch (split)"), ("re
         continue
     E = s["epochs"]  # training passes only (activations up, gradients down), as in Table 1: 3,144 training, 1,048 val. and test lesions
     up = s["bytes_per_train_sample"] * 2 * E * 3144 / (2 * E * 3144 + E * 1048 + 1048)
+    nb = float(np.mean([n_batches(n, BS_MILK) for n in N_TR_MILK]))
+    fk = "milk_resnet18_224px" if k.startswith("resnet18") else k.rsplit("_", 1)[0] + "_224"  # MILK10k images are 224 px (s11 SIZE)
     add(MK, lab, fam, s, "f1", up, E, {"nf_split": "full ResNet-18 bottom", "fm_split_lora": "LoRA adapters (r=16)", "fm_split_ft": "full ViT backbone"}[fam],
         "activations + gradients", f"milk_split.json:{k}", table="tab_freeze.tex", encoder=lab.split(",")[0],
-        cost_note="bytes_per_train_sample x training share of the passes, as tab_freeze")
+        cost_note="bytes_per_train_sample x training share of the passes, as tab_freeze", msgs=msgs_split(E, nb),
+        msgs_rule=f"{E} epochs x ({nb:g} batches of {BS_MILK} x 2 + 1 validation pass) (s11 / pe_split)",
+        gflops=3 * GF[fk] * E if fk in GF else None, gflops_rule=f"3 x forward x epochs (rule of tab_main), forward of {fk}")
 for k, mt in (("dinov2_b_frozen", "srFrozenB"), ("clip_b16_frozen", "srFrozenCb")):
     s = msplit2.get(k)
     if not s:
         continue
     E = s["epochs"]
     up = s["bytes_per_train_sample"] * 2 * E * 3144 / (2 * E * 3144 + E * 1048 + 1048) / 2  # frozen bottoms need no gradients (rule of tab_main)
+    nb = float(np.mean([n_batches(n, BS_MILK) for n in N_TR_MILK]))
     add(MK, f"{NAME[k.rsplit('_', 1)[0]]}, frozen bottoms (split)", "fm_split_frozen", s, "f1", up, E, "none", "activations (augmented views)",
         f"milk_split_v2.json:{k}", macros=((mt, f"{s['f1']:.1f}"),), encoder=NAME[k.rsplit("_", 1)[0]],
-        cost_note="derived: formula of tab_freeze, halved for frozen bottoms as tab_main (no table shows this upload)")
+        cost_note="derived: formula of tab_freeze, halved for frozen bottoms as tab_main (no table shows this upload)", msgs=msgs_split(E, nb, grads=False),
+        msgs_rule=f"{E} epochs x ({nb:g} batches of {BS_MILK} + 1 validation pass); frozen bottoms do not depend on the server: could be one message",
+        gflops=GF[k.rsplit("_", 1)[0] + "_224"] * E, gflops_rule="1 x forward x epochs (augmented views; rule of tab_main)")
 MD = {"dinov2_b": 768, "clip_b16": 768, "dinov2_g": 1536, "clip_l14": 1024}
 for k in ("dinov2_b", "clip_b16", "dinov2_g", "clip_l14"):
     s = milk.get(k, {}).get("clin+derm|mlp2|bal")
     if s:
         add(MK, f"{NAME[k]}, frozen, one upload", "fm_oneshot", s, "f1", 2 * MD[k] * 2, 1, "none", "plain features", f"milk_heads.json:{k}.clin+derm|mlp2|bal",
-            table="tab_freeze.tex", encoder=NAME[k], cost_note="2 x d x 2 (fp16), as tab_freeze")
+            table="tab_freeze.tex", encoder=NAME[k], cost_note="2 x d x 2 (fp16), as tab_freeze", gflops=GF[k + "_224"], cacheable=True,
+            gflops_rule="one forward pass at 224 px (vb224_encoders.json cost: same encoder and input size)")
 for k in ("dinov2_b", "clip_b16", "dinov2_g"):
     s = mreg.get(k, {}).get("late fusion (fixed 0.5)|views mean")
     if s:
         add(MK, f"{NAME[k]}, frozen, 8 views averaged, late fusion", "fm_oneshot", s, "f1", 2 * MD[k] * 2, 1, "none", "plain features",
             f"milk_reg.json:{k}.late fusion (fixed 0.5)|views mean", table="tab_freeze.tex", encoder=NAME[k],
-            cost_note="2 x d x 2 (fp16; mean of 8 views, upload x1), as tab_freeze")
+            cost_note="2 x d x 2 (fp16; mean of 8 views, upload x1), as tab_freeze", gflops=8 * GF[k + "_224"], cacheable=True,
+            gflops_rule="8 forward passes (8 views; x8 as the time of tab_freeze)")
 for ek, et in (("dinov2_g", "G"), ("clip_l14", "C")):
     r = he.get(f"milk10k/{ek}")
     if not r:
@@ -344,14 +381,17 @@ for ek, et in (("dinov2_g", "G"), ("clip_l14", "C")):
         s = r.get(pk, {}).get("mlp2")
         if s:
             add(MK, f"{NAME[ek]}, PCA-{d}, 16-bit", "fm_pca", s, "f1", 2 * d * 2, 1, "none", "compressed features", f"he_heads_milk.json:milk10k/{ek}.{pk}.mlp2",
-                macros=((f"heMilk{et}Mlp{tg}", f"{s['f1']:.1f}"),) if tg != "St" else (), encoder=NAME[ek], cost_note="2 x d x 2 (fp16)")
+                macros=((f"heMilk{et}Mlp{tg}", f"{s['f1']:.1f}"),) if tg != "St" else (), encoder=NAME[ek], cost_note="2 x d x 2 (fp16)",
+                gflops=GF[ek + "_224"], cacheable=True, gflops_rule="encoder forward at 224 px (PCA projection not counted)")
     for pk, d in (("full", MD[ek]), ("pca256", 256), ("pca64", 64), ("pca16", 16)):
         s = r.get(pk, {}).get("ridge")
         nb, note, extra = he_bytes("milk10k", "dinov2_g", d, True, ek)  # class-weighted ridge
         if s and nb:
-            add(MK, f"{NAME[ek]}, {'full' if pk == 'full' else 'PCA-' + str(d)}, class-weighted ridge under CKKS", "fm_he", s, "f1", nb, 2, "none",
+            add(MK, f"{NAME[ek]}, {'full' if pk == 'full' else 'PCA-' + str(d)}, class-weighted ridge under CKKS", "fm_he", s, "f1", nb, 1, "none",
                 "ciphertexts (CKKS)", f"he_heads_milk.json:milk10k/{ek}.{pk}.ridge", table="tab_he.tex", encoder=NAME[ek],
-                cost_note=note + "; F1 emulated in plaintext", extra_bytes=extra)
+                cost_note=note + "; F1 emulated in plaintext", extra_bytes=extra, msgs=6,
+                msgs_rule="encrypted class weights down + 1 encrypted upload + 2 x decryption round trip (aggregates, validation scores); key generation not counted",
+                gflops=GF[ek + "_224"], cacheable=True, gflops_rule="encoder forward at 224 px; CKKS operations are not counted in FLOPs (he_cost: seconds)")
 
 
 # ------------------------------------------------------------------ Pareto sets
@@ -377,6 +417,52 @@ for bench in (VB, MK):
         dom = [q for q in pts if q["bytes_per_sample"] <= p["bytes_per_sample"] and q is not p]
         q = max(dom, key=lambda q: (q["metric_mean"], -q["bytes_per_sample"]), default=None)
         p["best_point_at_most_as_costly"] = f"{q['name']} ({q['metric_mean']:.1f}, {q['bytes_human']})" if q and q["metric_mean"] >= p["metric_mean"] else ""
+
+
+# ------------------------------------------------------------------ the other axes: exposure ladder and Pareto sets per axis
+# Ordinal exposure of the parties' data, from most to least exposed (what the server receives):
+EXPO = ["activations + gradients, every step (split learning)", "plain features, once", "PCA-compressed / quantised features, once",
+        "per-party logits + gradients, every step", "DP-noised features, eps=64 per upload", "DP-noised features, eps=8 per upload",
+        "DP-noised features, eps=1 per upload", "ciphertexts only (CKKS; the label owner learns X^T X)"]
+EXPO_TICK = ["act. +\ngrad.", "plain\nfeat.", "PCA /\nquant.", "logits\n+ grad.", "DP\n$\\varepsilon$=64", "DP\n$\\varepsilon$=8", "DP\n$\\varepsilon$=1", "CKKS"]
+
+
+def exposure_rank(p):
+    f = p["fam"]
+    if f in ("nf_split", "fm_split_lora", "fm_split_ft", "fm_split_frozen"):
+        return 0  # frozen bottoms: activations of augmented views every step, without gradients
+    if f in ("fm_oneshot", "nf_ssl", "nf_frozen"):
+        return 1
+    if f == "fm_pca":
+        return 2
+    if f == "fm_logits":
+        return 3
+    if f == "fm_dp":
+        return {64: 4, 8: 5, 1: 6}[int(re.search(r"eps=(\d+)", p["name"]).group(1))]
+    return 7  # fm_he
+
+
+def pareto_by(pts, xf, low=True):
+    """Pareto set for (x, metric): x lower (low=True) or higher is better, metric higher is better; ties in x keep the best metric."""
+    out, best = [], -np.inf
+    for p in sorted(pts, key=lambda p: (xf(p) if low else -xf(p), -p["metric_mean"])):
+        if p["metric_mean"] > best:
+            out.append(p)
+            best = p["metric_mean"]
+    return out
+
+
+XF = {"rounds": lambda p: p["rounds"], "gflops": lambda p: p["party_gflops"], "exposure": lambda p: p["exposure_rank"]}
+for p in P:
+    p["exposure_rank"] = exposure_rank(p)
+    p["exposure_level"] = EXPO[p["exposure_rank"]]
+for bench in (VB, MK):
+    pts = [p for p in P if p["benchmark"] == bench and p["in_pareto_set"]]
+    for ax_, low in (("rounds", True), ("gflops", True), ("exposure", False)):
+        fr = {id(q) for q in pareto_by([q for q in pts if XF[ax_](q) is not None], XF[ax_], low)}
+        for q in P:
+            if q["benchmark"] == bench:
+                q[f"pareto_{ax_}"] = id(q) in fr
 
 
 # ------------------------------------------------------------------ check every number against the generated tables and macros.tex
@@ -408,7 +494,8 @@ YL = {VB: (73.3, 87.6), MK: (38.0, 65.5)}  # y range of the panels
 for p in P:
     p["plotted"] = p["in_pareto_set"] and p["metric_mean"] >= YL[p["benchmark"]][0]
 COLS = ["benchmark", "name", "family", "uses_foundation", "encoder", "metric", "metric_mean", "metric_std", "n_runs", "bytes_per_sample", "bytes_human",
-        "rounds", "party_backprop", "party_backprop_bool", "server_sees", "val_selected", "in_pareto_set", "plotted", "pareto", "pareto_no_plaintext",
+        "epochs", "rounds", "rounds_rule", "party_gflops", "gflops_rule", "party_compute_cacheable", "exposure_rank", "exposure_level",
+        "pareto_rounds", "pareto_gflops", "pareto_exposure", "party_backprop", "party_backprop_bool", "server_sees", "val_selected", "in_pareto_set", "plotted", "pareto", "pareto_no_plaintext",
         "best_point_at_most_as_costly", "cost_note", "aggregate_bytes_per_sample_not_counted", "table", "source"]
 with open(os.path.join(OUT, "frontier_points.csv"), "w", newline="") as f:
     w = csv.writer(f)
