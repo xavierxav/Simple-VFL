@@ -724,7 +724,7 @@ def axes_figure(bench, yl, yl_exp, one_y, fname):
                     va="bottom", **NOTE)
     dp = {(p["exposure_rank"], DIM.search(p["name"]).group(1)): p for p in pts if p["fam"] == "fm_dp"}
     for r in {r for r, _ in dp}:
-        order = [d for (_, d) in sorted(((dp[k]["_x"], k[1]) for k in dp if k[0] == r))]
+        order = [d for (_, d) in sorted((dp[k]["_x"], k[1]) for k in dp if k[0] == r)]
         assert order == ["PCA-16", "PCA-64", "full"], order  # the note below states this order
     if dp:
         ax.text(0.02, 0.03, "DP columns, left to right:\nPCA-16, PCA-64, full dim.", transform=ax.transAxes, ha="left", va="bottom", **NOTE)

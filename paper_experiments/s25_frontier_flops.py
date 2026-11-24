@@ -18,7 +18,6 @@ import json
 import os
 
 import torch.nn as nn
-
 from pe_common import save_json
 from pe_split import Bottom
 from s3_baselines import resnet18
