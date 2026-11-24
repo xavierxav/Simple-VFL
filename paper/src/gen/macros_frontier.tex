@@ -1,7 +1,7 @@
-\newcommand{\frMilkBeatNonFound}{55.6}
-\newcommand{\frMilkBeatNonFoundBytes}{256\,B}
-\newcommand{\frMilkBeatNonFoundName}{DINOv2-g, PCA-64, 16-bit}
-\newcommand{\frMilkBeatNonFoundRatio}{320}
+\newcommand{\frMilkBeatNonFound}{52.0}
+\newcommand{\frMilkBeatNonFoundBytes}{32\,B}
+\newcommand{\frMilkBeatNonFoundName}{DINOv2-B, PCA x bits up to 32 B (per-fold val. selection)}
+\newcommand{\frMilkBeatNonFoundRatio}{2{,}560}
 \newcommand{\frMilkBest}{63.6}
 \newcommand{\frMilkBestBytes}{60\,KiB}
 \newcommand{\frMilkBestGflops}{1{,}390}
@@ -18,27 +18,48 @@
 \newcommand{\frMilkCheapName}{DINOv2-g, frozen, 8 views averaged, late fusion}
 \newcommand{\frMilkCheapRatio}{1}
 \newcommand{\frMilkGflopsMatch}{35.1}
-\newcommand{\frMilkGflopsMatchAcc}{55.2}
-\newcommand{\frMilkGflopsMatchName}{CLIP-B, frozen, one upload}
+\newcommand{\frMilkGflopsMatchAcc}{55.5}
+\newcommand{\frMilkGflopsMatchName}{CLIP-B, PCA x bits up to 1536 B (per-fold val. selection)}
 \newcommand{\frMilkGflopsRatio}{6.2}
 \newcommand{\frMilkGflopsSplitNN}{218}
 \newcommand{\frMilkHeBest}{57.6}
 \newcommand{\frMilkHeBestName}{DINOv2-g, full, class-weighted ridge under CKKS}
 \newcommand{\frMilkHeRounds}{6}
-\newcommand{\frMilkNPareto}{6}
-\newcommand{\frMilkNParetoExposure}{3}
+\newcommand{\frMilkKnee}{58.2}
+\newcommand{\frMilkKneeBytes}{768\,B}
+\newcommand{\frMilkKneeChoice}{full, 2-bit, in 3 of 5 folds}
+\newcommand{\frMilkKneeName}{DINOv2-g}
+\newcommand{\frMilkKneeRef}{58.3}
+\newcommand{\frMilkKneeRefName}{DINOv2-g, PCA x bits up to 1536 B (per-fold val. selection)}
+\newcommand{\frMilkLogitBest}{58.6}
+\newcommand{\frMilkLogitBestBytes}{1\,KiB}
+\newcommand{\frMilkLogitBestEpochs}{19.6}
+\newcommand{\frMilkLogitBestKiB}{1.1}
+\newcommand{\frMilkLogitBestName}{DINOv2-g}
+\newcommand{\frMilkLogitBestRef}{57.3}
+\newcommand{\frMilkLogitBestRounds}{294}
+\newcommand{\frMilkLogitN}{4}
+\newcommand{\frMilkLogitNAboveRef}{3}
+\newcommand{\frMilkLogitRoundsMax}{315}
+\newcommand{\frMilkLogitRoundsMin}{294}
+\newcommand{\frMilkNPareto}{12}
+\newcommand{\frMilkNParetoExposure}{4}
 \newcommand{\frMilkNParetoExposureNonFound}{0}
-\newcommand{\frMilkNParetoFound}{6}
+\newcommand{\frMilkNParetoFound}{12}
 \newcommand{\frMilkNParetoGflops}{7}
 \newcommand{\frMilkNParetoGflopsNonFound}{0}
 \newcommand{\frMilkNParetoNonFound}{0}
 \newcommand{\frMilkNParetoRounds}{2}
 \newcommand{\frMilkNParetoRoundsNonFound}{0}
-\newcommand{\frMilkNPoints}{28}
-\newcommand{\frMilkNPointsAll}{28}
+\newcommand{\frMilkNPoints}{71}
+\newcommand{\frMilkNPointsAll}{77}
 \newcommand{\frMilkParetoExposureNonFoundName}{none}
 \newcommand{\frMilkParetoGflopsNonFoundName}{none}
 \newcommand{\frMilkParetoRoundsNonFoundName}{none}
+\newcommand{\frMilkPcaSixFourB}{54.2}
+\newcommand{\frMilkPcaSixFourBBytes}{64\,B}
+\newcommand{\frMilkPcaSixFourBChoice}{PCA-64, 4-bit, in 5 of 5 folds}
+\newcommand{\frMilkPcaSixFourBName}{CLIP-L}
 \newcommand{\frMilkRoundsMatch}{1}
 \newcommand{\frMilkRoundsMatchAcc}{60.5}
 \newcommand{\frMilkRoundsMatchName}{DINOv2-g, frozen, 8 views averaged, late fusion}
@@ -48,17 +69,17 @@
 \newcommand{\frMilkSplitNNName}{ResNet-18, ImageNet (split)}
 \newcommand{\frMilkSplitRoundsMax}{3{,}030}
 \newcommand{\frMilkSplitRoundsMin}{510}
-\newcommand{\frVbBeatNonFound}{81.2}
-\newcommand{\frVbBeatNonFoundBytes}{64\,B}
-\newcommand{\frVbBeatNonFoundName}{DINOv2-g, PCA-16, 2-bit}
-\newcommand{\frVbBeatNonFoundRatio}{25{,}600}
+\newcommand{\frVbBeatNonFound}{81.9}
+\newcommand{\frVbBeatNonFoundBytes}{128\,B}
+\newcommand{\frVbBeatNonFoundName}{DINOv2-g, PCA-16, 4-bit}
+\newcommand{\frVbBeatNonFoundRatio}{16}
 \newcommand{\frVbBest}{86.6}
 \newcommand{\frVbBestBytes}{56\,KiB}
 \newcommand{\frVbBestGflops}{197}
 \newcommand{\frVbBestName}{CLIP-L + CLIP-B, frozen, one upload}
-\newcommand{\frVbBestNonFound}{81.1}
-\newcommand{\frVbBestNonFoundBytes}{1.56\,MiB}
-\newcommand{\frVbBestNonFoundName}{SplitNN, VertiBench recipe (ResNet-18, 13 bands)}
+\newcommand{\frVbBestNonFound}{81.5}
+\newcommand{\frVbBestNonFoundBytes}{2\,KiB}
+\newcommand{\frVbBestNonFoundName}{ResNet-50 (ImageNet, supervised), PCA-64, 16-bit}
 \newcommand{\frVbBestOneShot}{86.6}
 \newcommand{\frVbBestOneShotBytes}{56\,KiB}
 \newcommand{\frVbBestOneShotName}{CLIP-L + CLIP-B, frozen, one upload}
@@ -76,6 +97,10 @@
 \newcommand{\frVbDpPcaSixteenEpsEight}{62.1}
 \newcommand{\frVbDpPcaSixteenEpsOne}{55.4}
 \newcommand{\frVbDpPcaSixteenEpsSixFour}{77.1}
+\newcommand{\frVbGapFiveOneTwoB}{2.7}
+\newcommand{\frVbGapSixFourB}{4.8}
+\newcommand{\frVbGapTwoFiveSixB}{3.0}
+\newcommand{\frVbGapTwoKiB}{4.1}
 \newcommand{\frVbGflopsMatch}{12.2}
 \newcommand{\frVbGflopsMatchAcc}{81.8}
 \newcommand{\frVbGflopsMatchName}{DINOv2-S, frozen, one upload}
@@ -90,16 +115,45 @@
 \newcommand{\frVbNParetoExposure}{4}
 \newcommand{\frVbNParetoExposureNonFound}{0}
 \newcommand{\frVbNParetoFound}{9}
-\newcommand{\frVbNParetoGflops}{6}
-\newcommand{\frVbNParetoGflopsNonFound}{1}
+\newcommand{\frVbNParetoGflops}{7}
+\newcommand{\frVbNParetoGflopsNonFound}{2}
 \newcommand{\frVbNParetoNonFound}{0}
 \newcommand{\frVbNParetoRounds}{1}
 \newcommand{\frVbNParetoRoundsNonFound}{0}
-\newcommand{\frVbNPoints}{49}
-\newcommand{\frVbNPointsAll}{76}
+\newcommand{\frVbNPoints}{62}
+\newcommand{\frVbNPointsAll}{89}
 \newcommand{\frVbParetoExposureNonFoundName}{none}
-\newcommand{\frVbParetoGflopsNonFoundName}{ResNet-50 (ImageNet, supervised), frozen, one upload}
+\newcommand{\frVbParetoGflopsNonFoundName}{ResNet-18 (ImageNet, supervised), PCA-32, 4-bit; ResNet-50 (ImageNet, supervised), PCA-64, 16-bit}
 \newcommand{\frVbParetoRoundsNonFoundName}{none}
+\newcommand{\frVbPcaGFiveOneTwoB}{83.9}
+\newcommand{\frVbPcaGFiveOneTwoBChoice}{PCA-64, 4-bit}
+\newcommand{\frVbPcaGSixFourB}{81.2}
+\newcommand{\frVbPcaGSixFourBChoice}{PCA-16, 2-bit}
+\newcommand{\frVbPcaGTwoFiveSixB}{83.8}
+\newcommand{\frVbPcaGTwoFiveSixBChoice}{PCA-32, 4-bit}
+\newcommand{\frVbPcaGTwoKiB}{85.6}
+\newcommand{\frVbPcaGTwoKiBChoice}{PCA-256, 4-bit}
+\newcommand{\frVbReachSplitNNFound}{81.2}
+\newcommand{\frVbReachSplitNNFoundBytes}{64\,B}
+\newcommand{\frVbReachSplitNNFoundName}{DINOv2-g, PCA-16, 2-bit}
+\newcommand{\frVbReachSplitNNFoundRatio}{25{,}600}
+\newcommand{\frVbReachSplitNNRatio}{8}
+\newcommand{\frVbReachSplitNNResnet}{81.2}
+\newcommand{\frVbReachSplitNNResnetBytes}{512\,B}
+\newcommand{\frVbReachSplitNNResnetName}{ResNet-50 (ImageNet, supervised), PCA-64, 4-bit}
+\newcommand{\frVbResnetFiveOneTwoB}{81.2}
+\newcommand{\frVbResnetFiveOneTwoBChoice}{PCA-64, 4-bit}
+\newcommand{\frVbResnetFiveOneTwoBName}{ResNet-50 (ImageNet, supervised)}
+\newcommand{\frVbResnetOneEightOneShot}{78.8}
+\newcommand{\frVbResnetSixFourB}{76.4}
+\newcommand{\frVbResnetSixFourBChoice}{PCA-16, 2-bit}
+\newcommand{\frVbResnetSixFourBName}{ResNet-18 (ImageNet, supervised)}
+\newcommand{\frVbResnetTwoFiveSixB}{80.8}
+\newcommand{\frVbResnetTwoFiveSixBChoice}{PCA-64, 2-bit}
+\newcommand{\frVbResnetTwoFiveSixBName}{ResNet-50 (ImageNet, supervised)}
+\newcommand{\frVbResnetTwoKiB}{81.5}
+\newcommand{\frVbResnetTwoKiBChoice}{PCA-64, 16-bit}
+\newcommand{\frVbResnetTwoKiBName}{ResNet-50 (ImageNet, supervised)}
 \newcommand{\frVbRoundsMatch}{1}
 \newcommand{\frVbRoundsMatchAcc}{86.6}
 \newcommand{\frVbRoundsMatchName}{CLIP-L + CLIP-B, frozen, one upload}

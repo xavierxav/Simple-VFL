@@ -96,6 +96,8 @@ mreg = load("milk_reg.json") or {}
 aud = load("vb_audit.json") or {}
 clipb = load("vb_split_clipb.json") or {}
 combo = load("vb224_combo.json") or {}
+mf = load("milk_frontier.json") or {}  # s24 milk: per-party PCA-k x bits (nested per-fold validation selection), few-round logit heads
+rn = load("vb224_controls_resnet.json") or {}  # s24 vb: ImageNet-supervised ResNet controls (one-shot heads, PCA-k x bits)
 base = {k: load(f"baseline_{k}.json") for k in ["splitnn_all", "splitnn_rgb", "splitnn_rgb_pt", "ssl_all", "ssl_rgb", "nat_all"]}
 K, N_TR = 16, 3142
 N_TR_H, N_VA_H, N_TE = int(N_TR * 0.85), N_TR - int(N_TR * 0.85), 785
@@ -140,6 +142,7 @@ def msgs_split(E, nb, val=True, grads=True):
 
 NAME = {"dinov2_g_224": "DINOv2-g", "dinov2_l_224": "DINOv2-L", "dinov2_b_224": "DINOv2-B", "dinov2_s_224": "DINOv2-S", "clip_l14_224": "CLIP-L",
         "clip_b16_224": "CLIP-B", "siglip_b16_224": "SigLIP-B", "resnet50_in1k_224": "ResNet-50 (ImageNet, supervised)",
+        "resnet18_in1k_224": "ResNet-18 (ImageNet, supervised)",
         "dinov2_b_random_224": "ViT-B (random weights)", "ssl4eo_s2_vits16": "SSL4EO-S12 ViT-S/16 (13 bands)",
         "dinov2_g": "DINOv2-g", "clip_l14": "CLIP-L", "dinov2_b": "DINOv2-B", "clip_b16": "CLIP-B"}
 
@@ -157,11 +160,24 @@ FAM = {
     "nf_ssl": ("one-shot SSL (FedOnce)", "h", C["grey"], False),
     "nf_frozen": ("one-shot, frozen ResNet-50 / random ViT", "o", C["grey"], False),
 }
+MENC = ("dinov2_b", "clip_b16", "dinov2_g", "clip_l14")  # MILK10k encoders
+RN_PCA = [k for k in ("resnet18_in1k_224", "resnet50_in1k_224") if (rn.get(k) or {}).get("E7_selected")]
+MK_LOGITS = any(f"clin+derm|logits{mf.get('K')}|bal" in (mf.get(k) or {}).get("heads", {}) for k in MENC)
+if RN_PCA:  # ImageNet ResNet PCA points: shorter labels, so that the hollow-marker legend keeps one row
+    FAM["nf_frozen"] = ("frozen ResNet / random ViT", "o", C["grey"], False)
+    FAM["nf_pca"] = ("ResNet, PCA + quant.", "o", C["grey"], False)
+if MK_LOGITS:  # 4 logits per party on VertiBench, 7 on MILK10k
+    FAM["fm_logits"] = ("logit head, few rounds", "D", C["purple"], True)
 FAM_LONG = {"fm_oneshot": "foundation one-shot frozen", "fm_pca": "foundation one-shot + PCA-k x bits", "fm_logits": "foundation few-round 4-logit",
             "fm_split_frozen": "foundation split learning frozen bottoms", "fm_split_lora": "foundation split LoRA",
             "fm_split_ft": "foundation split full fine-tuning", "fm_he": "HE head (foundation features)", "fm_dp": "DP upload (foundation features)",
             "nf_split": "non-foundation split learning (scratch or ImageNet ResNet)", "nf_ssl": "non-foundation one-shot self-supervised (FedOnce)",
-            "nf_frozen": "non-foundation one-shot frozen (ImageNet ResNet-50 / random ViT)"}
+            "nf_frozen": "non-foundation one-shot frozen (ImageNet ResNet-50 / random ViT)",
+            "nf_pca": "non-foundation one-shot + PCA-k x bits (ImageNet ResNet)"}
+if MK_LOGITS:
+    FAM_LONG["fm_logits"] = "foundation few-round per-party logits"
+if RN_PCA:
+    FAM_LONG["nf_frozen"] = "non-foundation one-shot frozen (ImageNet ResNet / random ViT)"
 
 P = []  # all points
 
@@ -273,6 +289,34 @@ for k, v in combo.items():  # two encoders per party (tab_combo_enc)
         f"vb224_combo.json:{k}.mlp2", table="tab_combo_enc.tex", encoder=" + ".join(NAME[n] for n in names),
         cost_note="K x (d1 + d2) x 2 (fp16), same rule as tab_main", gflops=sum(GF[n] for n in names), cacheable=True,
         gflops_rule="sum of the two forward passes (as tab_combo_enc)")
+# ImageNet-supervised ResNet controls (s24 vb, vb224_controls_resnet.json): no foundation model; one-shot MLP head on the frozen features
+# and the validation-selected PCA-k x bits points (E7_selected: best mean validation accuracy within each budget, the rule of the DINOv2-g
+# points below); a budget whose choice repeats a smaller budget's is the same point
+for k, r in rn.items():
+    if not isinstance(r, dict) or not r.get("cost"):
+        continue
+    g = r["cost"]["flops_per_image"] / 1e9
+    if k in GF and abs(GF[k] - g) > 1e-9 * g:
+        raise SystemExit(f"{k}: FLOPs of vb224_controls_resnet.json differ from the stored ones")
+    GF.setdefault(k, g)
+    h = r.get("heads", {})
+    if h.get("mlp2") and k not in heads224:  # ResNet-50 is already a point (vb224_encoders.json, tab_encoders)
+        add(VB, f"{NAME[k]}, frozen, one upload", "nf_frozen", h["mlp2"], "acc", K * h["dim"] * 2, 1, "none", "plain features",
+            f"vb224_controls_resnet.json:{k}.heads.mlp2", encoder=NAME[k], cost_note="K x dim x 2 (fp16), as tab_main", gflops=GF[k], cacheable=True,
+            gflops_rule="one forward pass (vb224_controls_resnet.json cost)")
+    if k not in RN_PCA:
+        continue
+    grid, seen = {(q["d"], q["bits"]): q for q in r["E7_pareto_val"]}, set()
+    for B, sel_ in sorted(r["E7_selected"]["budgets"].items(), key=lambda kv: int(kv[0])):
+        q = grid[(sel_["d"], sel_["bits"])]
+        assert q["acc"] == sel_["acc"] and q["bytes_per_sample"] == sel_["bytes_per_sample"] <= int(B), (k, B)
+        if (q["d"], q["bits"]) in seen:
+            continue
+        seen.add((q["d"], q["bits"]))
+        add(VB, f"{NAME[k]}, {'PCA-' + str(q['d']) if q['d'] < h['dim'] else 'full'}, {q['bits']}-bit", "nf_pca", q, "acc", q["bytes_per_sample"], 1,
+            "none", "compressed features", f"vb224_controls_resnet.json:{k}.E7_selected.budgets[{B}]", encoder=NAME[k],
+            cost_note="bytes_per_sample of the JSON (K x d x bits / 8), as tab_pareto", val_selected=True, gflops=GF[k], cacheable=True,
+            gflops_rule="one forward pass (PCA projection and quantisation: not counted)")
 # one-shot, PCA-k x b bits, validation-selected (E7_pareto_val, tab_pareto)
 par = Eg.get("E7_pareto_val") if isinstance(Eg.get("E7_pareto_val"), list) else []
 sel = set()
@@ -375,6 +419,7 @@ for k in ("dinov2_b", "clip_b16", "dinov2_g"):
             f"milk_reg.json:{k}.late fusion (fixed 0.5)|views mean", table="tab_freeze.tex", encoder=NAME[k],
             cost_note="2 x d x 2 (fp16; mean of 8 views, upload x1), as tab_freeze", gflops=8 * GF[k + "_224"], cacheable=True,
             gflops_rule="8 forward passes (8 views; x8 as the time of tab_freeze)")
+MK_PCA = [k for k in MENC if (mf.get(k) or {}).get("E7_selected")]
 for ek, et in (("dinov2_g", "G"), ("clip_l14", "C")):
     r = he.get(f"milk10k/{ek}")
     if not r:
@@ -383,7 +428,8 @@ for ek, et in (("dinov2_g", "G"), ("clip_l14", "C")):
         s = r.get(pk, {}).get("mlp2")
         if s:
             add(MK, f"{NAME[ek]}, PCA-{d}, 16-bit", "fm_pca", s, "f1", 2 * d * 2, 1, "none", "compressed features", f"he_heads_milk.json:milk10k/{ek}.{pk}.mlp2",
-                macros=((f"heMilk{et}Mlp{tg}", f"{s['f1']:.1f}"),) if tg != "St" else (), encoder=NAME[ek], cost_note="2 x d x 2 (fp16)",
+                macros=((f"heMilk{et}Mlp{tg}", f"{s['f1']:.1f}"),) if tg != "St" else (), encoder=NAME[ek], in_set=not MK_PCA,
+                cost_note="2 x d x 2 (fp16)" + ("; superseded by the validation-selected points of milk_frontier.json (not in the Pareto set)" if MK_PCA else ""),
                 gflops=GF[ek + "_224"], cacheable=True, gflops_rule="encoder forward at 224 px (PCA projection not counted)")
     for pk, d in (("full", MD[ek]), ("pca256", 256), ("pca64", 64), ("pca16", 16)):
         s = r.get(pk, {}).get("ridge")
@@ -394,6 +440,39 @@ for ek, et in (("dinov2_g", "G"), ("clip_l14", "C")):
                 cost_note=note + "; F1 emulated in plaintext", extra_bytes=extra, msgs=6,
                 msgs_rule="encrypted class weights down + 1 encrypted upload + 2 x decryption round trip (aggregates, validation scores); key generation not counted",
                 gflops=GF[ek + "_224"], cacheable=True, gflops_rule="encoder forward at 224 px; CKKS operations are not counted in FLOPs (he_cost: seconds)")
+
+# MILK10k, s24 milk (milk_frontier.json): per-party PCA-k x bits with nested per-fold validation selection (the folds rotate: each fold's choice
+# is made on its validation split and scored on its test fold; x = the largest upload of the 5 choices), and the few-round logit head
+if mf and mf["n_lesions"] != milk.get("n_lesions"):
+    raise SystemExit("milk_frontier.json and milk_heads.json do not use the same lesions")
+for k in MENC:
+    r = mf.get(k) or {}
+    seen = set()
+    for B, sel_ in sorted(((r.get("E7_selected") or {}).get("budgets") or {}).items(), key=lambda kv: int(kv[0])):
+        assert sel_["bytes_per_sample_max"] == max(mf["K"] * d * b / 8 for d, b in sel_["choices"]) <= int(B), (k, B)
+        ch = tuple(map(tuple, sel_["choices"]))
+        if ch in seen:  # a larger budget that changes no fold's choice: the same point
+            continue
+        seen.add(ch)
+        add(MK, f"{NAME[k]}, PCA x bits up to {sel_['bytes_per_sample_max']:.0f} B (per-fold val. selection)", "fm_pca", sel_, "f1",
+            sel_["bytes_per_sample_max"], 1, "none", "compressed features", f"milk_frontier.json:{k}.E7_selected.budgets[{B}]", encoder=NAME[k],
+            cost_note=f"largest K x d x bits / 8 of the folds' choices (d x bits) {' '.join(f'{d}x{b}' for d, b in ch)}; mean {sel_['bytes_per_sample_mean']:.0f} B",
+            val_selected="nested, per fold", gflops=GF[k + "_224"], cacheable=True, gflops_rule="encoder forward at 224 px (PCA projection and quantisation not counted)")
+        P[-1]["_sel"] = (k, sel_)
+    h = r.get("heads", {}).get(f"clin+derm|logits{mf.get('K')}|bal")
+    if h:
+        Km, Cm, Em = mf["K"], mf["C"], float(np.mean(h["epochs_run"]))
+        up = Em * 2 * Km * Cm * 2  # training passes only: C fp16 logits up, C gradients down per epoch (rule of the VertiBench 4-logit head)
+        assert abs(up - h["bytes_per_train_sample"]) < 1e-6 * up, k
+        nb = float(np.mean([n_batches(n, BS_HEAD) for n in N_TR_MILK]))
+        nb = int(nb) if nb.is_integer() else nb
+        add(MK, f"{NAME[k]}, {Cm}-logit MLP per party", "fm_logits", h, "f1", up, Em, "party MLP head on frozen features", "logits + gradients",
+            f"milk_frontier.json:{k}.heads.clin+derm|logits{Km}|bal", encoder=NAME[k],
+            cost_note=f"mean(epochs_run) x 2 x K x C x 2 (C={Cm} fp16 logits up, C gradients down per epoch), rule of tab_main",
+            msgs=msgs_split(Em, nb), msgs_rule=f"mean(epochs_run) x ({nb:g} batches of {BS_HEAD} x 2 + 1 validation pass) (train_head)",
+            gflops=GF[k + "_224"] + 6 * h["params"] / Km * Em / 1e9, cacheable=True,
+            gflops_rule="encoder forward at 224 px + party MLP training, 6 x params / K x mean(epochs_run)")
+        P[-1]["_key"] = k
 
 
 # ------------------------------------------------------------------ Pareto sets
@@ -435,7 +514,7 @@ def exposure_rank(p):
         return 0  # frozen bottoms: activations of augmented views every step, without gradients
     if f in ("fm_oneshot", "nf_ssl", "nf_frozen"):
         return 1
-    if f == "fm_pca":
+    if f in ("fm_pca", "nf_pca"):
         return 2
     if f == "fm_logits":
         return 3
@@ -511,7 +590,15 @@ with open(os.path.join(OUT, "frontier_points.csv"), "w", newline="") as f:
 print("wrote frontier_points.csv,", len(P), "points")
 
 # ------------------------------------------------------------------ figure
-XL = (20, 2.6 * MiB)
+def rn_lines(ax, pts):
+    """The validation-selected PCA curve of each ImageNet ResNet (hollow markers), as the green curve of DINOv2-g."""
+    for k in RN_PCA:
+        q = sorted((p for p in pts if p["fam"] == "nf_pca" and p["encoder"] == NAME[k]), key=lambda p: p["bytes_per_sample"])
+        ax.plot([p["bytes_per_sample"] for p in q], [p["metric_mean"] for p in q], color=C["grey"], lw=0.6, zorder=2)
+
+
+XL = (min(20, 0.75 * min(p["bytes_per_sample"] for p in P if p["in_pareto_set"])), 2.6 * MiB)  # MILK10k (2 parties) goes down to 4 B
+XMINOR = [2.0 ** i for i in range(int(np.ceil(np.log2(XL[0]))), 22)]
 fig, axs = plt.subplots(1, 2, figsize=(4.8, 2.95), sharex=True)
 for ax, bench in zip(axs, (VB, MK), strict=True):
     pts = [p for p in P if p["benchmark"] == bench and p["in_pareto_set"]]
@@ -520,6 +607,7 @@ for ax, bench in zip(axs, (VB, MK), strict=True):
     pc = sorted([p for p in pts if p["fam"] == "fm_pca"], key=lambda p: p["bytes_per_sample"])
     if bench == VB and pc:
         ax.plot([p["bytes_per_sample"] for p in pc], [p["metric_mean"] for p in pc], color=C["green"], lw=0.8, zorder=2)
+    rn_lines(ax, pts)
     # Pareto envelope (staircase), drawn under the markers
     fr = pareto(pts)
     xs, ys = [p["bytes_per_sample"] for p in fr], [p["metric_mean"] for p in fr]
@@ -533,7 +621,7 @@ for ax, bench in zip(axs, (VB, MK), strict=True):
             continue
         x, y, e = (np.array([p[c] for p in vis]) for c in ("bytes_per_sample", "metric_mean", "metric_std"))
         ax.errorbar(x, y, yerr=e, fmt="none", ecolor=col if fm else C["grey"], elinewidth=0.5, alpha=0.45, capsize=0, zorder=2)
-        ms = 12 if fam == "fm_pca" else (26 if mk in "PX" else 20)
+        ms = 12 if fam in ("fm_pca", "nf_pca") else (26 if mk in "PX" else 20)
         if fm:
             ax.scatter(x, y, s=ms, marker=mk, c=col, edgecolors="white", linewidths=0.4, zorder=3)
         else:
@@ -548,7 +636,7 @@ for ax, bench in zip(axs, (VB, MK), strict=True):
     ax.set_ylim(lo, hi)
     ax.set_xticks([32, 1 * KiB, 32 * KiB, 1 * MiB])
     ax.set_xticklabels(["32 B", "1 KiB", "32 KiB", "1 MiB"])
-    ax.set_xticks([2.0 ** i for i in range(5, 22)], minor=True)
+    ax.set_xticks(XMINOR, minor=True)
     ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
     ax.tick_params(axis="x", which="minor", length=1.5)
     ax.tick_params(labelsize=6.5)
@@ -567,7 +655,7 @@ def regime(ax, txt, p, xytext, ha="left"):
                 arrowprops=dict(arrowstyle="-", lw=0.4, color="#666666", shrinkA=1, shrinkB=3), **RG)
 
 
-for ax, bench, pos in ((axs[0], VB, {"communication": (40, 75.9), "accuracy": (300 * KiB, 87.25), "mix": (1.3 * KiB, 82.6), "security": (2.4 * MiB, 79.4)}),
+for ax, bench, pos in ((axs[0], VB, {"communication": (3.6, 84.7) if RN_PCA else (40, 75.9), "accuracy": (300 * KiB, 87.25), "mix": (1.3 * KiB, 82.6), "security": (2.4 * MiB, 79.4)}),
                        (axs[1], MK, {"communication": (110, 45.0), "accuracy": (12 * KiB, 64.6), "mix": (90, 60.5), "security": (2.4 * MiB, 51.0)})):
     fr = pareto([p for p in P if p["benchmark"] == bench and p["in_pareto_set"]])
     he_ = [p for p in P if p["benchmark"] == bench and p["fam"] == "fm_he"]
@@ -583,11 +671,16 @@ for ax, bench, pos in ((axs[0], VB, {"communication": (40, 75.9), "accuracy": (3
 H1 = [Line2D([], [], ls="", marker=mk, ms=4.2 if mk not in "PX" else 4.8, mfc=col, mec="white", mew=0.4, label=lab) for fam, (lab, mk, col, fm) in FAM.items() if fm]
 H1[1] = Line2D([], [], ls="-", lw=0.8, marker="o", ms=3.4, color=C["green"], mfc=C["green"], mec="white", mew=0.4, label=FAM["fm_pca"][0])
 H2 = [Line2D([], [], ls="", marker=mk, ms=4.2, mfc="white", mec=col, mew=0.9, label=lab) for fam, (lab, mk, col, fm) in FAM.items() if not fm]
-H2.append(Line2D([], [], ls=(0, (3, 2)), lw=0.7, color="k", marker="o", ms=6, mfc="none", mec="k", mew=0.6, label="Pareto-optimal (front)"))
+if RN_PCA:
+    H2[[f for f in FAM if not FAM[f][3]].index("nf_pca")] = Line2D([], [], ls="-", lw=0.6, marker="o", ms=3.4, color=C["grey"], mfc="white",
+                                                                  mec=C["grey"], mew=0.9, label=FAM["nf_pca"][0])
+H2.append(Line2D([], [], ls=(0, (3, 2)), lw=0.7, color="k", marker="o", ms=6, mfc="none", mec="k", mew=0.6,
+                 label="Pareto front" if RN_PCA else "Pareto-optimal (front)"))
+NC2 = len(H2) if RN_PCA else 4  # one row of hollow-marker entries
 kw = dict(frameon=False, fontsize=5.6, handletextpad=0.25, handlelength=1.3, columnspacing=0.8, borderaxespad=0.1, borderpad=0.1,
           title_fontsize=5.8, labelspacing=0.3, alignment="left")
 fig.legend(handles=H1, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 0.088), title="foundation model (filled markers)", **kw)
-fig.legend(handles=H2, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 0.0), title="no foundation model (hollow markers)", **kw)
+fig.legend(handles=H2, ncol=NC2, loc="lower left", bbox_to_anchor=(0.0, 0.0), title="no foundation model (hollow markers)", **kw)
 fig.tight_layout(rect=(0, 0.215, 1, 1), w_pad=1.0)
 fig.savefig(os.path.join(OUT, "fig_frontier.pdf"))
 fig.savefig(os.path.join(OUT, "fig_frontier.png"), dpi=220)
@@ -597,11 +690,11 @@ print("wrote fig_frontier.pdf, fig_frontier.png")
 # ------------------------------------------------------------------ the same frontier on other axes: fig_frontier_axes.pdf (VertiBench), _milk.pdf
 # (a) bytes (as fig_frontier), (b) sequential messages, (c) party-side GFLOPs per training image, (d) exposure ladder (ordinal, jittered)
 AXES = {
-    "bytes": dict(x=lambda p: p["bytes_per_sample"], low=True, base=2, xlim=(20, 2.6 * MiB), xlabel="bytes exchanged per sample (all parties)",
+    "bytes": dict(x=lambda p: p["bytes_per_sample"], low=True, base=2, xlim=XL, xlabel="bytes exchanged per sample (all parties)",
                   ticks=([32, KiB, 32 * KiB, MiB], ["32 B", "1 KiB", "32 KiB", "1 MiB"]), title="(a) communication volume"),
     "rounds": dict(x=lambda p: p["rounds"], low=True, base=10, xlim=(0.6, 3e4), xlabel="sequential messages until trained",
                    ticks=([1, 10, 100, 1000, 10000], ["1", "10", "100", "1k", "10k"]), title="(b) interaction"),
-    "gflops": dict(x=lambda p: p["party_gflops"], low=True, base=10, xlim=(4, 9000), xlabel="party GFLOPs per training image (fwd + bwd)",
+    "gflops": dict(x=lambda p: p["party_gflops"], low=True, base=10, xlim=(min(4, 0.75 * min(p["party_gflops"] or 9e9 for p in P)), 9000), xlabel="party GFLOPs per training image (fwd + bwd)",
                    ticks=([10, 100, 1000], ["10", "100", "1000"]), title="(c) party-side compute"),
     "exposure": dict(x=lambda p: p["exposure_rank"], low=False, base=None, xlim=(-0.6, len(EXPO) - 0.4), xlabel="what the server sees (most to least exposed)",
                      ticks=(list(range(len(EXPO))), EXPO_TICK), title="(d) exposure of the parties' data"),
@@ -632,6 +725,8 @@ def frontier_panel(ax, bench, axis, yl):
     if axis == "bytes" and bench == VB:  # validation-selected PCA / quantisation curve, as fig_frontier
         pc = sorted([p for p in pts if p["fam"] == "fm_pca"], key=lambda p: p["bytes_per_sample"])
         ax.plot([p["bytes_per_sample"] for p in pc], [p["metric_mean"] for p in pc], color=C["green"], lw=0.8, zorder=2)
+    if axis == "bytes":
+        rn_lines(ax, pts)
     fr = pareto_by(pts, A["x"], A["low"])
     assert {id(p) for p in fr} == {id(p) for p in pts if p["pareto" if axis == "bytes" else "pareto_" + axis]}, (bench, axis)
     if axis == "exposure":  # best metric at this level of exposure or a lower one: a non-increasing staircase
@@ -653,7 +748,7 @@ def frontier_panel(ax, bench, axis, yl):
             continue
         x, y, e = np.array([p["_x"] for p in vis]), np.array([p["metric_mean"] for p in vis]), np.array([p["metric_std"] for p in vis])
         ax.errorbar(x, y, yerr=e, fmt="none", ecolor=col if fm else C["grey"], elinewidth=0.5, alpha=0.45, capsize=0, zorder=2)
-        ms = 12 if fam == "fm_pca" else (26 if mk in "PX" else 20)
+        ms = 12 if fam in ("fm_pca", "nf_pca") else (26 if mk in "PX" else 20)
         if fm:
             ax.scatter(x, y, s=ms, marker=mk, c=col, edgecolors="white", linewidths=0.4, zorder=3)
         else:
@@ -664,7 +759,7 @@ def frontier_panel(ax, bench, axis, yl):
         ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
         ax.tick_params(axis="x", which="minor", length=1.5)
         if A["base"] == 2:
-            ax.set_xticks([2.0 ** i for i in range(5, 22)], minor=True)
+            ax.set_xticks(XMINOR, minor=True)
     ax.set_xlim(*A["xlim"])
     ax.set_ylim(lo, hi)
     ax.set_xticks(A["ticks"][0])
@@ -715,7 +810,10 @@ def axes_figure(bench, yl, yl_exp, one_y, fname):
     axs[0, 1].annotate("one upload", (1, one_y), xytext=(12, one_y), textcoords="data", va="center", fontsize=5.8, style="italic", color="#333333",
                        arrowprops=dict(arrowstyle="-|>", lw=0.5, color="#444444", shrinkA=1, shrinkB=4, mutation_scale=5))
     # (c): what is cacheable
-    axs[1, 0].text(0.02, 0.45, "frozen encoders:\none forward pass\nper image, cacheable", transform=axs[1, 0].transAxes, ha="left", va="top", **NOTE)
+    if RN_PCA:  # the ImageNet ResNets fill the lower left
+        axs[1, 0].text(0.02, 0.98, "frozen encoders: one\nforward pass, cacheable", transform=axs[1, 0].transAxes, ha="left", va="top", **NOTE)
+    else:
+        axs[1, 0].text(0.02, 0.45, "frozen encoders:\none forward pass\nper image, cacheable", transform=axs[1, 0].transAxes, ha="left", va="top", **NOTE)
     # (d): best HE point, order inside the DP columns, and what PCA buys under DP
     ax = axs[1, 1]
     he = max((p for p in pts if p["fam"] == "fm_he"), key=lambda p: p["metric_mean"], default=None)
@@ -740,7 +838,7 @@ def axes_figure(bench, yl, yl_exp, one_y, fname):
     fig.suptitle(bench + (" (16 parties)" if bench == VB else " (2 parties)"), fontsize=7.5, y=0.995)
     fig.text(0.01, 0.66 / H, "\n".join(foot), ha="left", va="bottom", **NOTE)
     fig.legend(handles=H1, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 0.26 / H), title="foundation model (filled markers)", **kw)
-    fig.legend(handles=H2, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 0.0), title="no foundation model (hollow markers)", **kw)
+    fig.legend(handles=H2, ncol=NC2, loc="lower left", bbox_to_anchor=(0.0, 0.0), title="no foundation model (hollow markers)", **kw)
     fig.tight_layout(rect=(0, 0.8 / H, 1, 1), w_pad=1.0, h_pad=0.6)
     fig.savefig(os.path.join(OUT, fname + ".pdf"), metadata={"CreationDate": None})
     fig.savefig(os.path.join(OUT, fname + ".png"), dpi=220)
@@ -765,7 +863,7 @@ def tex(s):
     return s.replace("eps=", "$\\varepsilon{=}$").replace("&", "\\&").replace("%", "\\%").replace("_", "\\_")
 
 
-ONESHOT = ("fm_oneshot", "fm_pca", "nf_ssl", "nf_frozen")  # one upload, plain or compressed features
+ONESHOT = ("fm_oneshot", "fm_pca", "nf_ssl", "nf_frozen", "nf_pca")  # one upload, plain or compressed features
 for bench, t in ((VB, "Vb"), (MK, "Milk")):
     allp = [p for p in P if p["benchmark"] == bench]
     pts = [p for p in allp if p["in_pareto_set"]]
@@ -850,6 +948,77 @@ for bench, t in ((VB, "Vb"), (MK, "Milk")):
         macro(f"{t}DpFullEps{eps}", f"{f_['metric_mean']:.1f}")
         macro(f"{t}DpPcaSixteenEps{eps}", f"{c_['metric_mean']:.1f}")
         macro(f"{t}DpPcaGainEps{eps}", f"{c_['metric_mean'] - f_['metric_mean']:.1f}")
+
+
+def choice_txt(k, ch):
+    """Modal (d, bits) of the per-fold choices of a nested-selected MILK10k point, e.g. 'full, 2-bit, in 3 of 5 folds'."""
+    (d, b), c = max(((tuple(x), ch.count(x)) for x in ch), key=lambda t: t[1])
+    return f"{'full' if d == mf[k]['dim'] else 'PCA-' + str(d)}, {b}-bit, in {c} of {len(ch)} folds"
+
+
+# MILK10k, s24 milk: few-round logit heads, the knee of the validation-selected PCA x bits points, the 64 B point
+mpts = [p for p in P if p["benchmark"] == MK and p["in_pareto_set"]]
+lg = [p for p in mpts if p["fam"] == "fm_logits"]
+if lg:
+    b = max(lg, key=lambda p: p["metric_mean"])
+    ref = {p["_key"]: mf[p["_key"]]["heads"]["clin+derm|mlp2|bal"]["f1"] for p in lg}  # reference MLP on the same features, re-run in s24
+    macro("MilkLogitBestName", tex(b["encoder"]))
+    macro("MilkLogitBest", f"{b['metric_mean']:.1f}")
+    macro("MilkLogitBestBytes", size(b["bytes_per_sample"]))
+    macro("MilkLogitBestKiB", f"{b['bytes_per_sample'] / KiB:.1f}")
+    macro("MilkLogitBestEpochs", f"{b['epochs']:.1f}")
+    macro("MilkLogitBestRounds", num(b["rounds"], 0))
+    macro("MilkLogitBestRef", f"{ref[b['_key']]:.1f}")
+    macro("MilkLogitN", str(len(lg)))
+    macro("MilkLogitNAboveRef", str(sum(p["metric_mean"] >= ref[p["_key"]] for p in lg)))
+sel_m = [p for p in mpts if p.get("_sel")]
+if sel_m:
+    # knee: the cheapest point within 1 F1 point of the best single-view one-shot upload (plain or compressed; 8-view averaging excluded)
+    one = [p for p in mpts if p["fam"] in ("fm_oneshot", "fm_pca") and "views" not in p["name"]]
+    top = max(one, key=lambda p: p["metric_mean"])
+    kn = min((p for p in one if p["metric_mean"] >= top["metric_mean"] - 1.0), key=lambda p: (p["bytes_per_sample"], -p["metric_mean"]))
+    macro("MilkKneeName", tex(kn["encoder"]))
+    macro("MilkKnee", f"{kn['metric_mean']:.1f}")
+    macro("MilkKneeBytes", size(kn["bytes_per_sample"]))
+    macro("MilkKneeChoice", choice_txt(*kn["_sel"][:1], kn["_sel"][1]["choices"]) if kn.get("_sel") else "--")
+    macro("MilkKneeRefName", tex(top["name"]))
+    macro("MilkKneeRef", f"{top['metric_mean']:.1f}")
+    s64 = max((p for p in sel_m if p["bytes_per_sample"] <= 64), key=lambda p: p["metric_mean"])  # the frontier at 64 B
+    macro("MilkPca64BName", tex(s64["encoder"]))
+    macro("MilkPca64B", f"{s64['metric_mean']:.1f}")
+    macro("MilkPca64BBytes", size(s64["bytes_per_sample"]))
+    macro("MilkPca64BChoice", choice_txt(s64["_sel"][0], s64["_sel"][1]["choices"]))
+# VertiBench, s24 vb: ImageNet ResNet + PCA x bits against DINOv2-g + PCA x bits, both validation-selected within the same budget
+if RN_PCA:
+    def g_at(B):  # DINOv2-g: best validation accuracy within the budget (rule of the fm_pca points above)
+        return max((q for q in par if q["bytes_per_sample"] <= B), key=lambda q: q["val_acc"])
+
+    for B, tag in ((64, "64B"), (256, "256B"), (512, "512B"), (2048, "2KiB")):
+        rs = [(k, rn[k]["E7_selected"]["budgets"][str(B)]) for k in RN_PCA if str(B) in rn[k]["E7_selected"]["budgets"]]
+        k, q = max(rs, key=lambda kq: kq[1]["acc"])  # the better of the two ResNets at this budget
+        g = g_at(B)
+        macro(f"VbResnet{tag}Name", tex(NAME[k]))
+        macro(f"VbResnet{tag}", f"{q['acc']:.1f}")
+        macro(f"VbResnet{tag}Choice", f"{'PCA-' + str(q['d']) if q['d'] < rn[k]['heads']['dim'] else 'full'}, {q['bits']}-bit")
+        macro(f"VbPcaG{tag}", f"{g['acc']:.1f}")
+        macro(f"VbPcaG{tag}Choice", f"{'PCA-' + str(g['d']) if g['d'] < D else 'full'}, {g['bits']}-bit")
+        macro(f"VbGap{tag}", f"{g['acc'] - q['acc']:.1f}")
+    # the smallest budget at which each validation-selected curve reaches SplitNN (VertiBench recipe)
+    sn = max((p for p in P if p["benchmark"] == VB and p["in_pareto_set"] and p["fam"] == "nf_split"), key=lambda p: p["metric_mean"])
+    rr = min((p for p in P if p["fam"] == "nf_pca" and p["metric_mean"] >= sn["metric_mean"]), key=lambda p: p["bytes_per_sample"], default=None)
+    gg = min((p for p in P if p["benchmark"] == VB and p["fam"] == "fm_pca" and p["in_pareto_set"] and p["metric_mean"] >= sn["metric_mean"]),
+             key=lambda p: p["bytes_per_sample"])
+    macro("VbReachSplitNNFoundName", tex(gg["name"]))
+    macro("VbReachSplitNNFound", f"{gg['metric_mean']:.1f}")
+    macro("VbReachSplitNNFoundBytes", size(gg["bytes_per_sample"]))
+    macro("VbReachSplitNNFoundRatio", num(sn["bytes_per_sample"] / gg["bytes_per_sample"], 0))  # SplitNN bytes / that point's
+    macro("VbReachSplitNNResnetName", tex(rr["name"]) if rr else "none")
+    macro("VbReachSplitNNResnet", f"{rr['metric_mean']:.1f}" if rr else "--")
+    macro("VbReachSplitNNResnetBytes", size(rr["bytes_per_sample"]) if rr else "--")
+    macro("VbReachSplitNNRatio", num(rr["bytes_per_sample"] / gg["bytes_per_sample"], 0) if rr else "--")  # ResNet budget / DINOv2-g budget
+    r18 = rn.get("resnet18_in1k_224", {}).get("heads", {}).get("mlp2")
+    if r18:
+        macro("VbResnet18OneShot", f"{r18['acc']:.1f}")
 with open(os.path.join(OUT, "macros_frontier.tex"), "w") as f:
     for k, v in sorted(MAC.items()):
         f.write(f"\\newcommand{{\\{k}}}{{{v}}}\n")
