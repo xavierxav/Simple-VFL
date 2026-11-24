@@ -156,7 +156,8 @@ if rep:
 for k, bands, lab in (("splitnn_all", 13, "SplitNN, our recipe, scratch"), ("splitnn_rgb", 3, "SplitNN, our recipe, scratch"), ("splitnn_rgb_pt", 3, "SplitNN, our recipe, ImageNet init.")):
     b = base[k]
     if b:
-        rows.append(row(lab, bands, size(4 * K * 512 * b["epochs"]), None, np.mean(b["secs_per_seed"]) / 60, b["summary"]))
+        n = b["summary"].get("n", 5)
+        rows.append(row(lab + (f", {n} seeds" if n != 5 else ""), bands, size(4 * K * 512 * b["epochs"]), None, np.mean(b["secs_per_seed"]) / 60, b["summary"]))
 N_TR_H, N_VA_H, N_TE = int(N_TR * 0.85), N_TR - int(N_TR * 0.85), 785
 for k, lab in (("clip_b16_lora", "CLIP ViT-B/16 bottoms, LoRA"), ("clip_b16_frozen", "CLIP ViT-B/16 bottoms, frozen")):
     s = clipb.get(k, {})
