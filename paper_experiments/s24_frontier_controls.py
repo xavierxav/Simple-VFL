@@ -196,7 +196,7 @@ def milk(encoders, out_name):
     from s11_milk10k import CLASSES7, ROOT, folds, lesions, zscore
 
     les = lesions()
-    y = les["dx7"].to_numpy()
+    y = les["dx7"].to_numpy().copy()
     Fo = folds(y)
     K, C = 2, int(y.max()) + 1
     res = load_json(out_name)
