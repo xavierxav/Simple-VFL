@@ -1097,6 +1097,39 @@ for k, t in AU.items():
                 macro(f"pairSn{t}{tag}Hi", f1(p[sub]["hi"]))
                 pv = p[sub]["mcnemar_p"]
                 macro(f"pairSn{t}{tag}P", f"{{=}}{pv:.3f}" if pv >= 0.001 else "{<}0.001")
+# paired tests compare 3-seed ensembles (seed-averaged probabilities), the tables report means over seeds: give both,
+# plus the direct LoRA split learning vs one-shot CLIP-B head comparison (same backbone, same seeds)
+_pf = {k: os.path.join(RES, f) for k, f in (("fr", "vb_frozen_probs.npz"), ("sp", "vb_split_clipb_probs.npz"), ("sn", "vb_repro_splitresnet_preds_probs.npz"))}
+if all(os.path.exists(f) for f in _pf.values()):
+    from s23_audit_analysis import paired as _paired
+
+    _fr, _sp, _sn = (np.load(_pf[k]) for k in ("fr", "sp", "sn"))
+    _y = _fr["y"]
+    _P = {"Clip": _fr["clip_l14_224__mlp2"], "G": _fr["dinov2_g_224__mlp2"], "ClipB": _fr["clip_b16_224__mlp2"],
+          "LgClip": _fr["clip_l14_224__logits16"], "LgG": _fr["dinov2_g_224__logits16"], "LgClipB": _fr["clip_b16_224__logits16"],
+          "Sn": np.stack([_sn[f"seed{i}"] for i in range(3)]),
+          "Lora": np.stack([_sp[f"clip_b16_lora__seed{i}"] for i in range(3)]),
+          "SplitFrozen": np.stack([_sp[f"clip_b16_frozen__seed{i}"] for i in range(3)])}
+    for t, P in _P.items():
+        macro(f"ens{t}Acc", f1((P[:3].mean(0).argmax(1) == _y).mean() * 100))  # 3-seed ensemble accuracy
+        acc = (P.argmax(2) == _y[None]).mean(1) * 100
+        macro(f"seed{t}Min", f1(acc.min()))
+        macro(f"seed{t}Max", f1(acc.max()))
+    _q = _paired(_P["Lora"].mean(0), _P["ClipB"][:3].mean(0), _y)
+    macro("pairLoraHeadDiff", f1(_q["diff"]))
+    macro("pairLoraHeadLo", f1(_q["lo"]))
+    macro("pairLoraHeadHi", f1(_q["hi"]))
+    macro("pairLoraHeadP", f"{{=}}{_q['mcnemar_p']:.3f}" if _q["mcnemar_p"] >= 0.001 else "{<}0.001")
+    # Holm over the eight comparisons with the reproduced SplitNN (all test images)
+    _ps = sorted((ana["paired"][k]["all"]["mcnemar_p"], t) for k, t in AU.items() if k in ana.get("paired", {}))
+    _m, _surv, _stop = len(_ps), [], False
+    for i, (pv, t) in enumerate(_ps):
+        if _stop or pv * (_m - i) >= 0.05:
+            _stop = True
+            continue
+        _surv.append(t)
+    macro("holmN", str(_m))
+    macro("holmSurvive", str(len(_surv)))
 if ana.get("nnpublic"):
     n = ana["nnpublic"]
     for key, t in (("label_match_all", "All"), ("label_match_sibling", "Sib"), ("label_match_no_sibling", "NoSib"), ("nn_is_sibling_given_sibling", "IsSib")):
