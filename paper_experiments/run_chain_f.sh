@@ -14,8 +14,10 @@ step() {
   echo "$(date +%H:%M:%S) end $n (exit $rc)"
 }
 URL=https://huggingface.co/datasets/xavvierxav/L1C_dataset/resolve/main/Vertibench.7z
-which aria2c > /dev/null || apt-get install -y -q aria2 > /dev/null 2>&1
-which 7z > /dev/null || apt-get install -y -q p7zip-full > /dev/null 2>&1
+if ! which aria2c > /dev/null || ! which 7z > /dev/null; then
+  apt-get update -qq > $L/apt.log 2>&1
+  apt-get install -y -q aria2 p7zip-full >> $L/apt.log 2>&1 || echo "$(date +%H:%M:%S) apt-get install failed (see apt.log)"
+fi
 pip uninstall -y -q torchao > /dev/null 2>&1  # the Colab image's torchao breaks recent peft (not needed here)
 (
   for i in $(seq 1 30); do
@@ -28,11 +30,16 @@ pip uninstall -y -q torchao > /dev/null 2>&1  # the Colab image's torchao breaks
 DL=$!
 # ---- B: MILK10k
 step milk_prep s11_milk10k.py prepare
-PE_OUT=/content/scratch_out step milk_feat s11_milk10k.py features --encoders dinov2_b,clip_b16,clip_l14,dinov2_g
+PE_OUT=/content/scratch_out step milk_feat s11_milk10k.py features --full-only --encoders dinov2_b,clip_b16,clip_l14,dinov2_g
 step milk_frontier s24_frontier_controls.py milk --encoders dinov2_b,clip_b16,clip_l14,dinov2_g
 # ---- A: VertiBench (s3pack verifies the archive size and resumes the download with curl if needed)
 wait $DL
-echo "$(date +%H:%M:%S) VertiBench archive ready"
+A=/content/vb_raw/Vertibench.7z
+if [ -f $A.aria2 ]; then  # aria2c gave up: the (sparse) file may have holes, let s3pack download it again from scratch
+  echo "$(date +%H:%M:%S) incomplete aria2 download ($(stat -c %s $A 2>/dev/null || echo 0) B), removed"
+  rm -f $A $A.aria2
+fi
+echo "$(date +%H:%M:%S) VertiBench archive: $(stat -c %s $A 2>/dev/null || echo missing) B"
 step s3pack s3_baselines.py pack
 step vb_resnet s24_frontier_controls.py vb --encoders resnet18_in1k_224,resnet50_in1k_224
 echo CHAIN_DONE

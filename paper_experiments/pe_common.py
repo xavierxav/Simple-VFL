@@ -204,9 +204,12 @@ def summarize(runs):
 
 
 def save_json(name, obj):
+    """Atomic: written to a temporary file in the same directory, then renamed (a kill mid-write keeps the old file)."""
     path = os.path.join(OUT, name)
-    with open(path, "w") as f:
+    tmp = f"{path}.tmp{os.getpid()}"
+    with open(tmp, "w") as f:
         json.dump(obj, f, indent=1)
+    os.replace(tmp, path)
     print("saved", path, flush=True)
 
 

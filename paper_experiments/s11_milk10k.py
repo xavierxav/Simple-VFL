@@ -119,14 +119,14 @@ def folds(y, k=5):
 
 
 # ------------------------------------------------------------------ frozen features
-def features(encoders):
+def features(encoders, full_only=False):
     from pe_encoders import encoder, extract
 
     imgs = {k: np.load(f"{ROOT}/img_{k}.npy", mmap_mode="r") for k in ("clin", "derm")}
     left, right = (lambda x: x[..., : SIZE // 2]), (lambda x: x[..., SIZE // 2 :])
     for name in encoders:
-        todo = [(k, v, c) for k in ("clin", "derm") for v, c in ((k, None), (k + "_left", left), (k + "_right", right))
-                if not os.path.exists(f"{ROOT}/f_{name}_{v}.npy")]
+        views = lambda k: ((k, None),) if full_only else ((k, None), (k + "_left", left), (k + "_right", right))  # noqa: E731
+        todo = [(k, v, c) for k in ("clin", "derm") for v, c in views(k) if not os.path.exists(f"{ROOT}/f_{name}_{v}.npy")]
         if not todo:
             continue
         try:
@@ -228,12 +228,13 @@ def main():
     ap.add_argument("stage", choices=["prepare", "features", "heads", "split", "all"])
     ap.add_argument("--encoders", default=",".join(ENCODERS))
     ap.add_argument("--kinds", default="resnet18,resnet18_in,dinov2_b_lora,clip_b16_lora,dinov2_b_ft")
+    ap.add_argument("--full-only", action="store_true", help="features: whole clinical and dermoscopic views only (no halves)")
     a = ap.parse_args()
     enc = a.encoders.split(",")
     if a.stage in ("prepare", "all"):
         prepare()
     if a.stage in ("features", "all"):
-        features(enc)
+        features(enc, a.full_only)
     if a.stage in ("heads", "all"):
         heads(enc)
     if a.stage in ("split", "all"):

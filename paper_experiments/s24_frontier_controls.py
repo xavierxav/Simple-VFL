@@ -20,8 +20,10 @@
          {"n_lesions", "classes", "K", "C", enc: {"dim", "heads": {"clin+derm|mlp2|bal", "clin+derm|logits2|bal"},
                                                   "E7_pareto_val": [...], "E7_selected": {...}}}
 Every grid point: summarize() of the runs (acc, auc, f1, bacc in %, mean/std/list) + val_acc[s] (+ val_f1[s] on MILK)
-+ d, bits, bytes_per_sample (one-time upload per sample, all parties: K * d * bits / 8).  JSON saved after every point;
-a re-run resumes (points already in the file are skipped).
++ d, bits, bytes_per_sample (one-time upload per sample, all parties: K * d * bits / 8).  E7_selected: VertiBench, best
+mean validation accuracy per byte budget (fixed official test); MILK10k, nested per-fold selection (rotating folds).
+JSON saved atomically after every point; a re-run resumes (points already in the file are skipped); exit 1 if an
+encoder has no features.
 """
 
 import argparse
@@ -47,19 +49,72 @@ def grid_dims(D):
     return [D] + [d for d in DIMS if d < D]  # s9.e7 uses (D, 512, ...): no duplicate point when D <= 512
 
 
-def select(grid, key, K, D):
-    """Validation-selected points as in make_assets2 (fig_pareto): best `key` among the points within each budget.
-    Budgets: powers of two from the smallest point up to, and including, the full fp16 upload K*D*2 bytes."""
-    full = K * D * 2
-    lo = min(p["bytes_per_sample"] for p in grid)
-    budgets = sorted({2**j for j in range(40) if lo <= 2**j <= full} | {full})
+SEL_KEYS = ("d", "bits", "bytes_per_sample", "acc", "acc_std", "auc", "auc_std", "f1", "f1_std", "bacc", "bacc_std")
+
+
+def select(grid, key):
+    """Validation-selected points as make_frontier.py does: for every byte budget present in the grid, the point with
+    the best mean `key` among the points within the budget (ties: the cheaper point).  Valid when the test set is fixed
+    and disjoint from every validation split (VertiBench official test)."""
     out = {}
-    for B in budgets:
+    for B in sorted({p["bytes_per_sample"] for p in grid}):
         cand = [p for p in grid if p["bytes_per_sample"] <= B]
-        if cand:
-            best = max(cand, key=lambda p: p[key])
-            out[str(int(B))] = {k: best[k] for k in ("d", "bits", "bytes_per_sample", key, "acc", "acc_std", "auc", "auc_std", "f1", "f1_std", "bacc", "bacc_std") if k in best}
+        best = max(cand, key=lambda p: (p[key], -p["bytes_per_sample"]))
+        out[str(int(B))] = {k: best[k] for k in SEL_KEYS + (key,) if k in best}
     return {"by": key, "budgets": out}
+
+
+def select_nested(grid, key):
+    """Per-fold (nested) validation selection for rotating folds (MILK10k: the union of the validation folds is the
+    union of the test folds, so one choice made on the mean validation score of the 5 folds would use test labels):
+    for every budget and fold f, the point with the best validation `key` on fold f (ties: the cheaper point) is scored
+    on test fold f only; the 5 test scores are aggregated.  `choices` lists the (d, bits) chosen per fold."""
+    out = {}
+    n = len(grid[0][key + "s"])
+    for B in sorted({p["bytes_per_sample"] for p in grid}):
+        cand = [p for p in grid if p["bytes_per_sample"] <= B]
+        best = [max(cand, key=lambda p: (p[key + "s"][f], -p["bytes_per_sample"])) for f in range(n)]
+        o = {"choices": [[b["d"], b["bits"]] for b in best], "bytes_per_sample_max": max(b["bytes_per_sample"] for b in best),
+             "bytes_per_sample_mean": float(np.mean([b["bytes_per_sample"] for b in best]))}
+        for m in ("acc", "auc", "f1", "bacc"):
+            if all(m + "s" in b for b in best):
+                v = [b[m + "s"][f] for f, b in enumerate(best)]
+                o[m], o[m + "_std"], o[m + "s"] = float(np.mean(v)), float(np.std(v, ddof=1)), v
+        out[str(int(B))] = o
+    return {"by": key + " (per fold, nested)", "budgets": out}
+
+
+def cached_compressor(d, bits, cache):
+    """s2_vertibench_heads.make_compressor(d, bits) with the per-party SVD of each seed's training rows computed once
+    and reused for every (d, bits) of the grid (cache: (seed, party) -> (mean, top rows of Vh)); same projection."""
+    from s2_vertibench_heads import party_quantizer as pq
+
+    def prep(Xtr, Xva, Xt, seed):
+        D = Xtr.shape[-1]
+        outs = [[], [], []]
+        for p in range(Xtr.shape[1]):
+            tr_p = Xtr[:, p]
+            if d < D:
+                if (seed, p) not in cache:
+                    mu = tr_p.mean(0)
+                    _, _, Vh = torch.linalg.svd(tr_p - mu, full_matrices=False)
+                    cache[(seed, p)] = (mu, Vh[: max(DIMS)].clone())
+                mu, Vh = cache[(seed, p)]
+                proj = lambda X, mu=mu, W=Vh[:d]: (X - mu) @ W.T  # noqa: E731
+            else:
+                proj = lambda X: X  # noqa: E731
+            Ztr = proj(tr_p)
+            if bits == 16:
+                qf = lambda Z: Z.half().float()  # noqa: E731
+            elif bits < 16:
+                qf = pq(Ztr, bits)
+            else:
+                qf = lambda Z: Z  # noqa: E731
+            for o, X in zip(outs, (Xtr, Xva, Xt)):
+                o.append(qf(proj(X[:, p])))
+        return tuple(torch.stack(o, 1) for o in outs)
+
+    return prep
 
 
 # ================================================================== A: VertiBench, ImageNet ResNets
@@ -88,19 +143,20 @@ def vb(encoders, out_name):
     import s12_vb224 as s12
 
     s12.build = _with_resnet18(s12.build)  # s12.extract looks build up at call time
-    import s2_vertibench_heads as s2
     import s9_controls as s9  # loads the VertiBench labels (stage-3 cache)
 
     res = load_json(out_name)
+    missing = []
     for name in encoders:
-        r = res.setdefault(name, {})
         cost = s12.extract([name])  # skipped when f7_{name}_{train,test}.npy are cached
+        if not all(os.path.exists(f"{s9.CACHE}/f7_{name}_{k}.npy") for k in ("train", "test")):
+            print("!! no features for", name, flush=True)
+            missing.append(name)
+            continue
+        r = res.setdefault(name, {})
         if name in cost:
             r["cost"] = cost[name]
             save_json(out_name, res)
-        if not os.path.exists(f"{s9.CACHE}/f7_{name}_test.npy"):
-            print("!! no features for", name, flush=True)
-            continue
         if "heads" not in r:
             h = s12.heads([name])  # 5 seeds, mlp2 + linear, as the encoder table (vb224_encoders.json)
             r["heads"] = h.get(name)
@@ -109,20 +165,22 @@ def vb(encoders, out_name):
         D = G[0].shape[-1]
         grid = r.setdefault("E7_pareto_val", [])
         done = {(p["d"], p["bits"]) for p in grid}
+        svd = {}  # (seed, party) -> (mean, Vh rows): one SVD per seed and party instead of one per grid point
         for d in grid_dims(D):
             for bits in BITS:
                 if (d, bits) in done:
                     continue
-                p = s9.run(G[0], G[1], prep=s2.make_compressor(d, bits))  # bits=16: half-precision cast
+                p = s9.run(G[0], G[1], prep=cached_compressor(d, bits, svd))  # bits=16: half-precision cast
                 p.update({"d": d, "bits": bits, "bytes_per_sample": 16 * d * bits / 8})
                 grid.append(p)
                 print(f"{name} E7 d={d:5d} bits={bits:2d} val {p['val_acc']:.2f} test {fmt(p)}", flush=True)
                 save_json(out_name, res)
-        r["E7_selected"] = select(grid, "val_acc", 16, D)
+        r["E7_selected"] = select(grid, "val_acc")
         save_json(out_name, res)
-        del G
+        del G, svd
         torch.cuda.empty_cache()
-    print("DONE", flush=True)
+    print("DONE" if not missing else f"!! MISSING {missing}", flush=True)
+    return missing
 
 
 # ================================================================== B: MILK10k
@@ -202,9 +260,11 @@ def milk(encoders, out_name):
     res = load_json(out_name)
     res.update({"n_lesions": int(len(y)), "classes": CLASSES7, "K": K, "C": C, "parties": ["clin", "derm"],
                 "head": "clin+derm|mlp2|bal (s11): MLP, class-weighted cross-entropy, stopping on the unweighted val. loss"})
+    missing = []
     for enc in encoders:
         if not all(os.path.exists(f"{ROOT}/f_{enc}_{k}.npy") for k in ("clin", "derm")):
             print("!! no features for", enc, flush=True)
+            missing.append(enc)
             continue
         P = [np.load(f"{ROOT}/f_{enc}_{k}.npy").astype(np.float32) for k in ("clin", "derm")]
         D = P[0].shape[1]
@@ -246,10 +306,11 @@ def milk(encoders, out_name):
                 grid.append(p)
                 print(f"{enc:9s} d={d:5d} bits={bits:2d} val F1 {p['val_f1']:.2f} test {fmt(p)}", flush=True)
                 save_json(out_name, res)
-        r["E7_selected"] = select(grid, "val_f1", K, D)
-        r["E7_selected_val_acc"] = select(grid, "val_acc", K, D)
+        r["E7_selected"] = select_nested(grid, "val_f1")
+        r["E7_selected_val_acc"] = select_nested(grid, "val_acc")
         save_json(out_name, res)
-    print("DONE", flush=True)
+    print("DONE" if not missing else f"!! MISSING {missing}", flush=True)
+    return missing
 
 
 def main():
@@ -260,9 +321,10 @@ def main():
     a = ap.parse_args()
     seed_all(0)
     if a.stage == "vb":
-        vb((a.encoders or "resnet18_in1k_224,resnet50_in1k_224").split(","), a.out or os.environ.get("PE_CONTROLS_OUT", "vb224_controls_resnet.json"))
+        miss = vb((a.encoders or "resnet18_in1k_224,resnet50_in1k_224").split(","), a.out or os.environ.get("PE_CONTROLS_OUT", "vb224_controls_resnet.json"))
     else:
-        milk((a.encoders or "dinov2_b,clip_b16,clip_l14,dinov2_g").split(","), a.out or "milk_frontier.json")
+        miss = milk((a.encoders or "dinov2_b,clip_b16,clip_l14,dinov2_g").split(","), a.out or "milk_frontier.json")
+    raise SystemExit(1 if miss else 0)
 
 
 if __name__ == "__main__":
