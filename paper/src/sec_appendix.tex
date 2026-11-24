@@ -39,6 +39,12 @@ Encoder & Params & GFLOPs & $d$ & Acc. (\%) & F1 (\%) & Linear acc. (\%)\\
 
 \FloatBarrier
 
+\IfFileExists{gen/fig_frontier_axes.pdf}{%
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{gen/fig_frontier_axes.pdf}
+\caption{The frontier of Fig.~\ref{fig:frontier} along the other axes of the cost accounting (Sec.~\ref{sec:accounting}): party compute, synchronised rounds and what the server receives.}\label{fig:frontier-axes}
+\end{figure}}{}
+
 \section{Compression grid}\label{app:pca}
 
 This appendix supports contribution C1: it gives the full grid of local PCA and quantisation from which the main text takes the knee of the frontier, and the limits of compressing without coordination.
@@ -302,7 +308,7 @@ The rotation costs nothing (\gdRotAcc\,\% accuracy against \gdPlainAcc\,\%), the
 
 \subsection{Differential privacy of the upload}
 
-Party $k$ clips each vector (raw or after PCA) at the median $\ell_2$ norm $c_k$ of its own training vectors and adds noise $\mathcal{N}(0,\sigma_k^2 I)$. For fixed preprocessing and $c_k$, replacing one record changes the clipped vector by at most $2c_k$, so each release is $\mu$-Gaussian-DP with $\mu=2c_k/\sigma_k$~\cite{dong2022gdp}; we set $\sigma_k$ from a target per-upload $(\varepsilon,\delta=10^{-5})$. The 16 uploads of a sample compose to $4\mu$: a per-upload $\varepsilon=8$ gives $\varepsilon\approx50$ for the sample, and $\varepsilon=64$ gives $\varepsilon\approx630$. These budgets do not account for estimating the clipping norms or fitting the PCA on the training data. On VertiBench with DINOv2-g, per-upload $\varepsilon=64$ drops accuracy to \dpFullSsf\,\%, and $\varepsilon=8$ to \dpFullEight\,\%, below the \majVB\,\% of always predicting the majority class; at $\varepsilon=8$ the inversion PSNR is that of the mean training image to the reported precision and re-identification is near chance (Table~\ref{tab:privacy}). Compressing first helps: after PCA-16 the same budgets give \dpStSsf\,\% and \dpStEight\,\%, after PCA-64 \dpSfSsf\,\% and \dpSfEight\,\%. Even at nominal budgets that give no meaningful formal guarantee, per-party noise is costly.
+Party $k$ clips each vector (raw or after PCA) at the median $\ell_2$ norm $c_k$ of its own training vectors and adds noise $\mathcal{N}(0,\sigma_k^2 I)$. For fixed preprocessing and $c_k$, replacing one record changes the clipped vector by at most $2c_k$, so each release is $\mu$-Gaussian-DP with $\mu=2c_k/\sigma_k$~\cite{dong2022gdp}; we set $\sigma_k$ from a target per-upload $(\varepsilon,\delta=10^{-5})$. The 16 uploads of a sample compose to $4\mu$: a per-upload $\varepsilon=8$ gives $\varepsilon\approx50$ for the sample, and $\varepsilon=64$ gives $\varepsilon\approx630$. These budgets do not account for estimating the clipping norms or fitting the PCA on the training data: the guarantee is formal but loose. Because the clipped signal has a fixed norm while the noise norm grows with the square root of the dimension, PCA is what makes DP usable. On VertiBench with DINOv2-g, a per-upload $\varepsilon=8$ drops the full features to \dpFullEight\,\%, below the \majVB\,\% of always predicting the majority class (the inversion PSNR is then that of the mean training image to the reported precision, and re-identification is near chance; Table~\ref{tab:privacy}), whereas after PCA-16 the same budget keeps \dpStEight\,\%, above it. At $\varepsilon=64$, full features give \dpFullSsf\,\%, PCA-64 \dpSfSsf\,\% and PCA-16 \dpStSsf\,\% (PCA-64 at $\varepsilon=8$: \dpSfEight\,\%). PCA followed by DP is thus the privacy end of the frontier: a formal, loose guarantee at an accuracy cost, whereas the reproduced SplitNN, at \reproAcc\,\%, offers no formal guarantee.
 
 \subsection{Encrypted training of a linear head}
 
