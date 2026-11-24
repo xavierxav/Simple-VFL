@@ -1,0 +1,72 @@
+\section{The Accuracy--Cost Frontier}\label{sec:frontier}
+
+Figure~\ref{fig:frontier} places every method we run on the two main benchmarks by its cumulative training payload per sample and its score. On both benchmarks the empirical envelope is made of foundation-encoder points only (\frVbNParetoFound{} of \frVbNPareto{} envelope points on VertiBench, \frMilkNParetoFound{} of \frMilkNPareto{} on MILK10k). Which regime lies on it depends on the budget and on the domain.
+
+\begin{figure}[t]
+\centering\IfFileExists{gen/fig_frontier.pdf}{\includegraphics[width=\linewidth]{gen/fig_frontier.pdf}}{\fbox{\parbox{0.9\linewidth}{\centering fig\_frontier pending}}}
+\caption{The empirical accuracy--communication frontier on VertiBench Satellite (left, test accuracy, 16 parties) and MILK10k (right, macro F1, 2 parties). Horizontal axis: bytes exchanged per training sample over a whole training run, all parties and both directions (log scale); for the encrypted ridge heads, the encrypted upload only, without the aggregates. Filled markers use a foundation encoder, hollow markers do not; bars are standard deviations over seeds or folds. Circled points form the envelope (dashed). On VertiBench the PCA curve shows the configuration selected on validation at each budget, and seven points of DP uploads (\dpFullOne--\dpStEight\,\%) lie below the axis.}\label{fig:frontier}
+\end{figure}
+
+\subsection{VertiBench: one compressed upload is the knee}\label{sec:frontier-vb}\phantomsection\label{sec:exp-main}
+
+\begin{table}[t]
+\caption{VertiBench Satellite (16 parties, 4 classes, official test set). Upload: training payload per sample over all parties, in half precision (activations or logits up, their gradients down when needed). GFLOPs: party-side compute per image (one training run for split learning, one forward pass for cached features). Time: minutes on one A100 (split training, FedOnce pre-training or feature extraction). Mean\,$\pm$\,sample std over 5 seeds unless noted; --: not recorded. The VertiBench SplitNN recipe runs the 16 bottoms sequentially at batch 32 and tests at every epoch, hence its low GPU utilisation.}\label{tab:main}
+\centering\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{@{}lcrrrccc@{}}
+\toprule
+Method & Bands & Upload & GFLOPs & Time & Acc. (\%) & F1 (\%) & AUC (\%)\\
+\midrule
+\inputtab{gen/tab_main.tex}
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+\paragraph{No trained or split-learning point is on the envelope.}
+Our re-implementation of the published split-learning reference reaches $\reproAcc\pm\reproStd$\,\% (Table~\ref{tab:main}), and our own recipe matches it from ImageNet weights (\splitPTAcc\,\%) but not from scratch (\splitAllAcc\,\%). FedOnce, whose parties learn their encoder on their own unlabelled images before one upload, reaches \natAcc\,\% with Noise As Targets and \sslAllAcc\,\% with SimCLR: on 3{,}142 training locations, party-side self-supervision does not beat supervised split learning. The best non-foundation point, the reproduced SplitNN (\frVbBestNonFound\,\% for \frVbBestNonFoundBytes{} over 50 synchronised epochs), is matched by a one-shot upload of \frVbBeatNonFoundBytes{} per sample (\frVbBeatNonFoundName: \frVbBeatNonFound\,\%), i.e.\ with \frVbBeatNonFoundRatio{} times fewer bytes. A frozen supervised ImageNet ResNet-50 reaches 80.9\,\% with a 64\,KiB upload (App.~\ref{app:vb}), which is dominated as well; we have not compressed its features.
+% UPDATE when the ResNet-18/50 + PCA control on VertiBench is available.
+
+\paragraph{One upload of frozen features.}
+Uncompressed, frozen CLIP ViT-L/14 features reach \vbClipAcc\,\% (32\,KiB), DINOv2 ViT-g/14 \vbGAcc\,\% (48\,KiB) and CLIP ViT-B/16 \vbClipBAcc\,\% (24\,KiB). On the same test predictions as a three-seed SplitNN re-run (\auSnAll\,\%), CLIP-L gains $\pairSnClipDiff$ points ($[\pairSnClipLo,\pairSnClipHi]$, $p\pairSnClipP$) and CLIP-B $\pairSnClipBDiff$ ($p\pairSnClipBP$). DINOv2-g's gain of $\pairSnGDiff$ points is not significant ($[\pairSnGLo,\pairSnGHi]$, $p\pairSnGP$). The four-logit heads give $p\pairSnLgClipP$, $p\pairSnLgGP$ and $p\pairSnLgClipBP$, and CLIP-B split learning with LoRA gains $\pairSnLoraDiff$ points ($p\pairSnLoraP$). These $p$-values are not corrected for multiplicity: with a Holm correction over the eight comparisons with SplitNN, only the LoRA run and the CLIP-B four-logit head stay below 0.05. Every foundation-based head leads SplitNN, and the leads grow on the test samples without a training sibling (CLIP-L: $\pairSnClipNoSibDiff$ points, $p\pairSnClipNoSibP$; Sec.~\ref{sec:vb-audit}). We detect no difference between CLIP-L and DINOv2-g ($\pairDiff$ points, $p=\pairP$). The compressed uploads below were not included in the paired tests.
+
+\paragraph{The PCA knee.}\phantomsection\label{sec:exp-compress}
+Each party compresses its own upload with a local PCA and uniform quantisation (Sec.~\ref{sec:r1}). Selected on validation under a byte budget, DINOv2-g uploads reach \selTwoAcc\,\% at \selTwoBytes{} per sample for all 16 parties, \selTwokAcc\,\% at \selTwokBytes{} (\selTwokCfg) and \selFullAcc\,\% at \selFullBytes{} (\selFullCfg), against \fullAcc\,\% uncompressed (48\,KiB; full grid in App.~\ref{app:pca}). On 3{,}142 labelled locations, compression also regularises the head. Beyond \selTwokBytes, quadrupling the upload gains half a point, and the most accurate point we measure, two encoders side by side (\frVbBestName), reaches \frVbBest\,\% at \frVbBestBytes. The knee is a standard compression, not a new algorithm, and it has limits. The per-party bases are incompatible, so a head that averages the parties' vectors to tolerate missing parties drops from \poolGMean{} to \poolGPcaMean\,\% after PCA (Sec.~\ref{sec:frontier-enc}). On MILK10k, PCA slightly lowers macro F1 (\mrGPca{} vs.\ \mrGCat\,\% for DINOv2-g, \mrCPca{} vs.\ \mrCCat\,\% for CLIP-L). Its other role is to make the private end of the frontier affordable (Sec.~\ref{sec:server}).
+
+\paragraph{Few rounds and adaptation do not pay on VertiBench.}
+The four-logit heads reach \lgClipAcc\,\% (CLIP-L), \lgGAcc\,\% (DINOv2-g) and \lgClipBAcc\,\% (CLIP-B) with \lgClipUp--\lgGUp{} of training traffic over about \lgClipEp{} synchronised epochs. That is the accuracy of an uncompressed upload, but below the compressed upload of \selTwokBytes; their interest is what the server does not see (Sec.~\ref{sec:server}). Split learning with CLIP-B bottoms reaches \vbSplitLoraAcc\,\% with LoRA (\vbSplitLoraN{} seeds, \vbSplitLoraUp{} per sample, \vbSplitLoraMin{} minutes per run) and \vbSplitFrozenAcc\,\% with frozen bottoms, against \vbClipBAcc\,\% for the one-shot head on the same encoder: adapting the backbone does not help here, and the most accurate VertiBench points are frozen.
+
+\paragraph{Party compute.}
+The one-shot and few-round regimes need one forward pass per image and no backpropagation at the parties, and the features can be cached. This is not minimal compute. A DINOv2-g pass costs \vbGGF{} GFLOPs per image, more than the \rEighteenTrainGF{} GFLOPs of training the SplitNN bottom for 50 epochs, whereas CLIP-B costs \vbClipBGF{} GFLOPs for \vbClipBAcc\,\% and the frozen ResNet-50 above only 8. Encoding all images of the 16 parties takes \vbGMin{} minutes with DINOv2-g and \vbClipBMin{} with CLIP-B on one A100, against \reproMin{} minutes for each SplitNN run.
+
+\subsection{MILK10k: the price of freezing}\label{sec:frontier-milk}\phantomsection\label{sec:exp-freeze}
+
+\begin{table}[t]
+\caption{The price of freezing on MILK10k (clinical and dermoscopic parties, 7 classes, 5 folds, class-balanced loss). Split learning trains the party models (bottoms) with the label owner's gradients; one-shot rows use frozen features and an MLP head (concatenation, or late fusion of per-party heads on features averaged over the 8 rotations and flips of each photograph). Upload: per training sample, over the 10 training epochs for split learning (as in Table~\ref{tab:main}), once for one-shot. Time: minutes per fold for split learning; for one-shot, encoding the images once, estimated from the VertiBench throughput of the encoder.}\label{tab:freeze}
+\centering\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{@{}llrrrccc@{}}
+\toprule
+Party models & Training & Trainable & Upload & Time & F1 (\%) & Bal.\ acc.\ (\%) & Acc.\ (\%)\\
+\midrule
+\inputtab{gen/tab_freeze.tex}
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+\paragraph{Adaptation is the accuracy end.}
+On MILK10k the envelope runs from compressed uploads through multi-view late fusion to split learning with LoRA (Fig.~\ref{fig:frontier}). A \frMilkBeatNonFoundBytes{} upload (\frMilkBeatNonFoundName) already reaches \frMilkBeatNonFound\,\% macro F1, above the best non-foundation point, split learning with ImageNet ResNet-18 bottoms (\frMilkBestNonFound\,\% for \frMilkBestNonFoundBytes, \frMilkBeatNonFoundRatio{} times more bytes). The most accurate point is DINOv2-B adapted with LoRA (\frMilkBest\,\% for \frMilkBestBytes), against \frMilkBestOneShot\,\% for the best one-shot point (\frMilkBestOneShotName, \frMilkBestOneShotBytes); this lead is smaller than the fold standard deviation of the LoRA run (Table~\ref{tab:freeze}).
+
+\paragraph{The price of freezing depends on the recipe.}
+With the same backbone and the same concatenation head, LoRA raises macro F1 from \fzdinovTwob{} to \fzdinovTwoblora\,\% for DINOv2-B and from \fzclipbSixteen{} to \fzclipbSixteenlora\,\% for CLIP-B; full fine-tuning (\fzdinovTwobft\,\%) is no better than LoRA. Freezing thus costs \fzGapCb{} to \fzGapB{} points, but this comparison gives split learning an advantage: it trains on random crops and flips, while the frozen parties see each image once. The parties can precompute augmentation, by averaging the features of the 8 rotations and flips of each photograph, and the server can fuse per-party heads. The same frozen encoders then reach \fzViewsB\,\% (DINOv2-B) and \fzViewsCb\,\% (CLIP-B), \fzGapViewsB{} and \fzGapViewsCb{} points below LoRA, and late fusion is better than concatenation on every fold for DINOv2-g ($\mrGPairD\pm\mrGPairS$ points), as expected from modality competition in jointly trained heads~\cite{wang2020makes,peng2022balanced} (App.~\ref{app:milk}). In a separate paired re-run under one split-learning recipe, LoRA beats frozen bottoms on all five folds, by $\srGapB\pm\srGapSdB$ points for DINOv2-B and $\srGapCb\pm\srGapSdCb$ for CLIP-B. Under that recipe, however, frozen CLIP-B bottoms change F1 by $\srVsHeadCb$ points relative to the one-shot MLP (DINOv2-B: $\srVsHeadB$), so part of the CLIP-B gain reflects a weak frozen baseline. Pre-training matters more than the training scheme: split learning reaches \fzresnetEighteen\,\% from scratch and \fzresnetEighteenin\,\% from ImageNet weights, below every frozen general-purpose foundation encoder. The remaining points have a price that the F1 does not show: every party needs a GPU, runs backpropagation and stays online for the whole run, and exchanges \fzUpdinovTwoblora{} per sample instead of 3\,KiB once, again at every re-training. We have not yet run the four-logit head or DP uploads on MILK10k.
+% UPDATE when the MILK10k four-logit and PCA-grid runs are available.
+
+\paragraph{When to adapt.}
+The two benchmarks disagree: adaptation buys several F1 points on dermatology images and nothing on Sentinel-2 composites. We attribute the difference to the distance between each domain and web-scale pre-training data, a hypothesis that two benchmarks cannot establish. Domain-specific encoders do not remove the price of freezing either: the Sentinel-2 model SSL4EO-S12 on 13 bands stays below CLIP-L on VertiBench (Table~\ref{tab:main}), and the medical encoders BiomedCLIP and MONET stay below DINOv2-g on MILK10k (App.~\ref{app:milk}).
+
+\subsection{Encoder choice and missing parties}\label{sec:frontier-enc}
+
+On VertiBench, all pre-trained ViTs lie within a few points of each other under the same head, whereas a randomly initialised ViT-B reaches only 75.1\,\%: the gain comes from pre-training, not from the head (App.~\ref{app:vb}). Encoder size matters moderately (DINOv2-S: \vbDinoSAcc\,\% for \vbDinoSGF{} GFLOPs; DINOv2-g: \vbGAcc\,\%), so the encoder is a parameter that parties without accelerators can choose for cost. Because the 16 parties are redundant, missing parties are a realistic stress test. A concatenation head whose missing uploads are replaced by zeros falls to \missZeroTwelveZ\,\% with 12 of 16 parties missing, the majority-class rate; imputing the party's training mean (\missZeroTwelveM\,\%) or training with party dropout (\missHTwelveZ\,\%) repairs most of the loss. A pooling head that normalises each party's vector, averages over the parties present and applies the MLP needs neither: it reaches \poolGMean\,\% with all parties, \poolMissTwelve\,\% with 12 missing and \poolMissFifteen\,\% with a single party left. It requires a shared feature space, however, which per-party PCA removes and which parties with different modalities never have.
