@@ -705,9 +705,9 @@ def axes_figure(bench, yl, yl_exp, one_y, fname):
     foot = [(f"({k[0]})" if len(k) == 1 else f"({k[0]})–({k[-1]})") + " " + t for t, k in merged.items()]
     pts = [p for p in P if p["benchmark"] == bench and p["in_pareto_set"]]
     have = {p["fam"] for p in pts}
-    miss = [FAM[f][0] for f in ("fm_dp", "fm_logits") if f not in have and any(q["fam"] == f for q in P)]
+    miss = [n for f, n in (("fm_dp", "DP uploads"), ("fm_logits", "4-logit heads")) if f not in have and any(q["fam"] == f for q in P)]
     if miss:
-        foot.append("not run on this benchmark yet: " + ", ".join(miss))
+        foot.append("not run on this benchmark yet: " + " and ".join(miss))
     ylab = "test accuracy (%)" if bench == VB else "macro F1 (%)"
     for ax in axs[:, 0]:
         ax.set_ylabel(ylab, fontsize=7)
@@ -720,7 +720,7 @@ def axes_figure(bench, yl, yl_exp, one_y, fname):
     ax = axs[1, 1]
     he = max((p for p in pts if p["fam"] == "fm_he"), key=lambda p: p["metric_mean"], default=None)
     if he:
-        ax.annotate(", ".join(he["name"].split(", ")[:2]), (he["_x"], he["metric_mean"]), xytext=(-3, 6), textcoords="offset points", ha="right",
+        ax.annotate(", ".join(he["name"].split(", ")[:2]), (he["_x"], he["metric_mean"]), xytext=(-5, 3), textcoords="offset points", ha="right",
                     va="bottom", **NOTE)
     dp = {(p["exposure_rank"], DIM.search(p["name"]).group(1)): p for p in pts if p["fam"] == "fm_dp"}
     for r in {r for r, _ in dp}:
@@ -741,7 +741,7 @@ def axes_figure(bench, yl, yl_exp, one_y, fname):
     fig.text(0.01, 0.66 / H, "\n".join(foot), ha="left", va="bottom", **NOTE)
     fig.legend(handles=H1, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 0.26 / H), title="foundation model (filled markers)", **kw)
     fig.legend(handles=H2, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 0.0), title="no foundation model (hollow markers)", **kw)
-    fig.tight_layout(rect=(0, 0.8 / H, 1, 0.985), w_pad=1.0, h_pad=0.6)
+    fig.tight_layout(rect=(0, 0.8 / H, 1, 1), w_pad=1.0, h_pad=0.6)
     fig.savefig(os.path.join(OUT, fname + ".pdf"), metadata={"CreationDate": None})
     fig.savefig(os.path.join(OUT, fname + ".png"), dpi=220)
     plt.close(fig)
@@ -751,7 +751,7 @@ def axes_figure(bench, yl, yl_exp, one_y, fname):
 
 
 axes_figure(VB, YL[VB], (50.0, 88.5), 80.75, "fig_frontier_axes")
-axes_figure(MK, YL[MK], (38.0, 65.5), 46.5, "fig_frontier_axes_milk")
+axes_figure(MK, YL[MK], (38.0, 65.5), 59.0, "fig_frontier_axes_milk")
 
 # ------------------------------------------------------------------ macros
 MAC = {}
@@ -799,6 +799,57 @@ for bench, t in ((VB, "Vb"), (MK, "Milk")):
     macro(f"{t}BeatNonFound", f"{cb['metric_mean']:.1f}")
     macro(f"{t}BeatNonFoundBytes", size(cb["bytes_per_sample"]))
     macro(f"{t}BeatNonFoundRatio", f"{nf['bytes_per_sample'] / cb['bytes_per_sample']:,.0f}".replace(",", "{,}"))
+
+# other axes (fig_frontier_axes): new names only, the macros above keep their names and values
+SPLIT = ("nf_split", "fm_split_frozen", "fm_split_lora", "fm_split_ft")
+
+
+def num(v, nd=None):
+    nd = (1 if v < 100 else 0) if nd is None else nd
+    return f"{v:,.{nd}f}".replace(",", "{,}")
+
+
+for bench, t in ((VB, "Vb"), (MK, "Milk")):
+    pts = [p for p in P if p["benchmark"] == bench and p["in_pareto_set"]]
+    for xk, k in (("rounds", "Rounds"), ("gflops", "Gflops"), ("exposure", "Exposure")):
+        fr = [p for p in pts if p["pareto_" + xk]]
+        macro(f"{t}NPareto{k}", str(len(fr)))
+        macro(f"{t}NPareto{k}NonFound", str(sum(not p["uses_foundation"] for p in fr)))
+        macro(f"{t}Pareto{k}NonFoundName", tex("; ".join(p["name"] for p in fr if not p["uses_foundation"])) or "none")
+    b = max(pts, key=lambda p: p["metric_mean"])  # = \fr<t>BestName
+    macro(f"{t}BestRounds", num(b["rounds"], 0))
+    macro(f"{t}BestGflops", num(b["party_gflops"]))
+    # SplitNN (best non-foundation split) against the cheapest one-shot foundation point at least as good, on each axis
+    sn = max((p for p in pts if p["fam"] == "nf_split"), key=lambda p: p["metric_mean"])
+    macro(f"{t}SplitNNName", tex(sn["name"]))
+    macro(f"{t}SplitNN", f"{sn['metric_mean']:.1f}")
+    for xk, k in (("rounds", "Rounds"), ("party_gflops", "Gflops")):
+        m = min((p for p in pts if p["fam"] in ("fm_oneshot", "fm_pca") and p["metric_mean"] >= sn["metric_mean"]), key=lambda p: (p[xk], -p["metric_mean"]))
+        macro(f"{k}SplitNN".join([t, ""]), num(sn[xk], 0 if xk == "rounds" else None))
+        macro(f"{t}{k}MatchName", tex(m["name"]))
+        macro(f"{t}{k}Match", num(m[xk], 0 if xk == "rounds" else None))
+        macro(f"{t}{k}MatchAcc", f"{m['metric_mean']:.1f}")
+        macro(f"{t}{k}Ratio", num(sn[xk] / m[xk], 0 if sn[xk] / m[xk] >= 10 else 1))
+    sp = [p["rounds"] for p in pts if p["fam"] in SPLIT]
+    macro(f"{t}SplitRoundsMin", num(min(sp), 0))
+    macro(f"{t}SplitRoundsMax", num(max(sp), 0))
+    lg = [p["rounds"] for p in pts if p["fam"] == "fm_logits"]
+    if lg:
+        macro(f"{t}LogitRoundsMin", num(min(lg), 0))
+        macro(f"{t}LogitRoundsMax", num(max(lg), 0))
+    he = [p for p in pts if p["fam"] == "fm_he"]
+    assert len({p["rounds"] for p in he}) == 1
+    macro(f"{t}HeRounds", num(he[0]["rounds"], 0))
+    hb = max(he, key=lambda p: p["metric_mean"])
+    macro(f"{t}HeBestName", tex(hb["name"]))
+    macro(f"{t}HeBest", f"{hb['metric_mean']:.1f}")
+    # DP: what PCA-16 buys over the full dimension at the same epsilon (VertiBench only so far)
+    dp = {(int(re.search(r"eps=(\d+)", p["name"]).group(1)), DIM.search(p["name"]).group(1)): p for p in pts if p["fam"] == "fm_dp"}
+    for eps in sorted({e for e, _ in dp}):
+        f_, c_ = dp[(eps, "full")], dp[(eps, "PCA-16")]
+        macro(f"{t}DpFullEps{eps}", f"{f_['metric_mean']:.1f}")
+        macro(f"{t}DpPcaSixteenEps{eps}", f"{c_['metric_mean']:.1f}")
+        macro(f"{t}DpPcaGainEps{eps}", f"{c_['metric_mean'] - f_['metric_mean']:.1f}")
 with open(os.path.join(OUT, "macros_frontier.tex"), "w") as f:
     for k, v in sorted(MAC.items()):
         f.write(f"\\newcommand{{\\{k}}}{{{v}}}\n")
