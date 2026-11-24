@@ -824,8 +824,8 @@ for bench, t in ((VB, "Vb"), (MK, "Milk")):
     macro(f"{t}SplitNNName", tex(sn["name"]))
     macro(f"{t}SplitNN", f"{sn['metric_mean']:.1f}")
     for xk, k in (("rounds", "Rounds"), ("party_gflops", "Gflops")):
-        m = min((p for p in pts if p["fam"] in ("fm_oneshot", "fm_pca") and p["metric_mean"] >= sn["metric_mean"]), key=lambda p: (p[xk], -p["metric_mean"]))
-        macro(f"{k}SplitNN".join([t, ""]), num(sn[xk], 0 if xk == "rounds" else None))
+        m = min((p for p in pts if p["fam"] in ("fm_oneshot", "fm_pca") and p[xk] is not None and p["metric_mean"] >= sn["metric_mean"]), key=lambda p: (p[xk], -p["metric_mean"]))
+        macro(f"{t}{k}SplitNN", num(sn[xk], 0 if xk == "rounds" else None))
         macro(f"{t}{k}MatchName", tex(m["name"]))
         macro(f"{t}{k}Match", num(m[xk], 0 if xk == "rounds" else None))
         macro(f"{t}{k}MatchAcc", f"{m['metric_mean']:.1f}")

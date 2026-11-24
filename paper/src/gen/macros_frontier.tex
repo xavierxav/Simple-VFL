@@ -4,6 +4,7 @@
 \newcommand{\frMilkBeatNonFoundRatio}{320}
 \newcommand{\frMilkBest}{63.6}
 \newcommand{\frMilkBestBytes}{60\,KiB}
+\newcommand{\frMilkBestGflops}{1{,}390}
 \newcommand{\frMilkBestName}{DINOv2-B, LoRA (split)}
 \newcommand{\frMilkBestNonFound}{51.4}
 \newcommand{\frMilkBestNonFoundBytes}{80\,KiB}
@@ -11,21 +12,49 @@
 \newcommand{\frMilkBestOneShot}{60.5}
 \newcommand{\frMilkBestOneShotBytes}{6\,KiB}
 \newcommand{\frMilkBestOneShotName}{DINOv2-g, frozen, 8 views averaged, late fusion}
+\newcommand{\frMilkBestRounds}{1{,}010}
 \newcommand{\frMilkCheap}{60.5}
 \newcommand{\frMilkCheapBytes}{6\,KiB}
 \newcommand{\frMilkCheapName}{DINOv2-g, frozen, 8 views averaged, late fusion}
 \newcommand{\frMilkCheapRatio}{1}
+\newcommand{\frMilkGflopsMatch}{35.1}
+\newcommand{\frMilkGflopsMatchAcc}{55.2}
+\newcommand{\frMilkGflopsMatchName}{CLIP-B, frozen, one upload}
+\newcommand{\frMilkGflopsRatio}{6.2}
+\newcommand{\frMilkGflopsSplitNN}{218}
+\newcommand{\frMilkHeBest}{57.6}
+\newcommand{\frMilkHeBestName}{DINOv2-g, full, class-weighted ridge under CKKS}
+\newcommand{\frMilkHeRounds}{6}
 \newcommand{\frMilkNPareto}{6}
+\newcommand{\frMilkNParetoExposure}{3}
+\newcommand{\frMilkNParetoExposureNonFound}{0}
 \newcommand{\frMilkNParetoFound}{6}
+\newcommand{\frMilkNParetoGflops}{7}
+\newcommand{\frMilkNParetoGflopsNonFound}{0}
 \newcommand{\frMilkNParetoNonFound}{0}
+\newcommand{\frMilkNParetoRounds}{2}
+\newcommand{\frMilkNParetoRoundsNonFound}{0}
 \newcommand{\frMilkNPoints}{28}
 \newcommand{\frMilkNPointsAll}{28}
+\newcommand{\frMilkParetoExposureNonFoundName}{none}
+\newcommand{\frMilkParetoGflopsNonFoundName}{none}
+\newcommand{\frMilkParetoRoundsNonFoundName}{none}
+\newcommand{\frMilkRoundsMatch}{1}
+\newcommand{\frMilkRoundsMatchAcc}{60.5}
+\newcommand{\frMilkRoundsMatchName}{DINOv2-g, frozen, 8 views averaged, late fusion}
+\newcommand{\frMilkRoundsRatio}{2{,}020}
+\newcommand{\frMilkRoundsSplitNN}{2{,}020}
+\newcommand{\frMilkSplitNN}{51.4}
+\newcommand{\frMilkSplitNNName}{ResNet-18, ImageNet (split)}
+\newcommand{\frMilkSplitRoundsMax}{3{,}030}
+\newcommand{\frMilkSplitRoundsMin}{510}
 \newcommand{\frVbBeatNonFound}{81.2}
 \newcommand{\frVbBeatNonFoundBytes}{64\,B}
 \newcommand{\frVbBeatNonFoundName}{DINOv2-g, PCA-16, 2-bit}
 \newcommand{\frVbBeatNonFoundRatio}{25{,}600}
 \newcommand{\frVbBest}{86.6}
 \newcommand{\frVbBestBytes}{56\,KiB}
+\newcommand{\frVbBestGflops}{197}
 \newcommand{\frVbBestName}{CLIP-L + CLIP-B, frozen, one upload}
 \newcommand{\frVbBestNonFound}{81.1}
 \newcommand{\frVbBestNonFoundBytes}{1.56\,MiB}
@@ -33,12 +62,50 @@
 \newcommand{\frVbBestOneShot}{86.6}
 \newcommand{\frVbBestOneShotBytes}{56\,KiB}
 \newcommand{\frVbBestOneShotName}{CLIP-L + CLIP-B, frozen, one upload}
+\newcommand{\frVbBestRounds}{1}
 \newcommand{\frVbCheap}{86.1}
 \newcommand{\frVbCheapBytes}{8\,KiB}
 \newcommand{\frVbCheapName}{DINOv2-g, PCA-512, 8-bit}
 \newcommand{\frVbCheapRatio}{7}
+\newcommand{\frVbDpFullEpsEight}{52.6}
+\newcommand{\frVbDpFullEpsOne}{51.7}
+\newcommand{\frVbDpFullEpsSixFour}{61.7}
+\newcommand{\frVbDpPcaGainEpsEight}{9.5}
+\newcommand{\frVbDpPcaGainEpsOne}{3.7}
+\newcommand{\frVbDpPcaGainEpsSixFour}{15.4}
+\newcommand{\frVbDpPcaSixteenEpsEight}{62.1}
+\newcommand{\frVbDpPcaSixteenEpsOne}{55.4}
+\newcommand{\frVbDpPcaSixteenEpsSixFour}{77.1}
+\newcommand{\frVbGflopsMatch}{12.2}
+\newcommand{\frVbGflopsMatchAcc}{81.8}
+\newcommand{\frVbGflopsMatchName}{DINOv2-S, frozen, one upload}
+\newcommand{\frVbGflopsRatio}{31}
+\newcommand{\frVbGflopsSplitNN}{379}
+\newcommand{\frVbHeBest}{83.4}
+\newcommand{\frVbHeBestName}{CLIP-L, PCA-256, ridge trained under CKKS}
+\newcommand{\frVbHeRounds}{5}
+\newcommand{\frVbLogitRoundsMax}{330}
+\newcommand{\frVbLogitRoundsMin}{273}
 \newcommand{\frVbNPareto}{9}
+\newcommand{\frVbNParetoExposure}{4}
+\newcommand{\frVbNParetoExposureNonFound}{0}
 \newcommand{\frVbNParetoFound}{9}
+\newcommand{\frVbNParetoGflops}{6}
+\newcommand{\frVbNParetoGflopsNonFound}{1}
 \newcommand{\frVbNParetoNonFound}{0}
+\newcommand{\frVbNParetoRounds}{1}
+\newcommand{\frVbNParetoRoundsNonFound}{0}
 \newcommand{\frVbNPoints}{49}
 \newcommand{\frVbNPointsAll}{76}
+\newcommand{\frVbParetoExposureNonFoundName}{none}
+\newcommand{\frVbParetoGflopsNonFoundName}{ResNet-50 (ImageNet, supervised), frozen, one upload}
+\newcommand{\frVbParetoRoundsNonFoundName}{none}
+\newcommand{\frVbRoundsMatch}{1}
+\newcommand{\frVbRoundsMatchAcc}{86.6}
+\newcommand{\frVbRoundsMatchName}{CLIP-L + CLIP-B, frozen, one upload}
+\newcommand{\frVbRoundsRatio}{9{,}900}
+\newcommand{\frVbRoundsSplitNN}{9{,}900}
+\newcommand{\frVbSplitNN}{81.1}
+\newcommand{\frVbSplitNNName}{SplitNN, VertiBench recipe (ResNet-18, 13 bands)}
+\newcommand{\frVbSplitRoundsMax}{9{,}900}
+\newcommand{\frVbSplitRoundsMin}{850}
