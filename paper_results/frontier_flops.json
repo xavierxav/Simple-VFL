@@ -1,0 +1,91 @@
+{
+ "splitnn_bottom_13band_158px": {
+  "flops_per_image": 2239016576,
+  "model": "s3_baselines.resnet18(13, small_stem=False)",
+  "input": [
+   13,
+   158,
+   158
+  ]
+ },
+ "fedonce_13band_train_128px": {
+  "flops_per_image": 1441923072,
+  "model": "s3_baselines.resnet18(13) + SimCLR projection 512-512-128",
+  "input": [
+   13,
+   128,
+   128
+  ]
+ },
+ "fedonce_13band_feat_158px": {
+  "flops_per_image": 2239016576,
+  "model": "s3_baselines.resnet18(13), features",
+  "input": [
+   13,
+   158,
+   158
+  ]
+ },
+ "splitnn_bottom_rgb_158px": {
+  "flops_per_image": 1847581056,
+  "model": "s3_baselines.resnet18(3, small_stem=False)",
+  "input": [
+   3,
+   158,
+   158
+  ]
+ },
+ "fedonce_rgb_train_128px": {
+  "flops_per_image": 1185021952,
+  "model": "s3_baselines.resnet18(3) + SimCLR projection 512-512-128",
+  "input": [
+   3,
+   128,
+   128
+  ]
+ },
+ "fedonce_rgb_feat_158px": {
+  "flops_per_image": 1847581056,
+  "model": "s3_baselines.resnet18(3), features",
+  "input": [
+   3,
+   158,
+   158
+  ]
+ },
+ "fedonce_nat_13band_train_128px": {
+  "flops_per_image": 1441333248,
+  "model": "s3_baselines.resnet18(13) + NAT projection 512-64",
+  "input": [
+   13,
+   128,
+   128
+  ]
+ },
+ "fedonce_nat_13band_feat_158px": {
+  "flops_per_image": 2239082112,
+  "model": "s3_baselines.resnet18(13) + NAT projection 512-64, features",
+  "input": [
+   13,
+   158,
+   158
+  ]
+ },
+ "milk_resnet18_224px": {
+  "flops_per_image": 3627122688,
+  "model": "pe_split.Bottom('resnet18')",
+  "input": [
+   3,
+   224,
+   224
+  ]
+ },
+ "check": {
+  "vertibench_resnet18_bottom_158px": {
+   "recounted": 2526878208,
+   "stored": 2526878208,
+   "match": true
+  }
+ },
+ "counter": "s12_vb224.flops_per_image (torch.utils.flop_counter.FlopCounterMode, 2 FLOPs per multiply-add)"
+}
