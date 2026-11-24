@@ -20,6 +20,7 @@ Pareto-optimal: no other point is at least as cheap and at least as good, with o
 import csv
 import json
 import os
+import re
 import sys
 
 import matplotlib
@@ -99,6 +100,43 @@ base = {k: load(f"baseline_{k}.json") for k in ["splitnn_all", "splitnn_rgb", "s
 K, N_TR = 16, 3142
 N_TR_H, N_VA_H, N_TE = int(N_TR * 0.85), N_TR - int(N_TR * 0.85), 785
 D = 1536
+FL = load("frontier_flops.json") or {}  # s25_frontier_flops.py: FLOPs of the ResNet-18 bottoms that vb224_encoders.json does not cover
+GF = {k: v["flops_per_image"] / 1e9 for k, v in cost.items()}  # forward GFLOPs per image (vb224_encoders.json, 224 px; VertiBench bottom 158 px)
+GF.update({k: v["flops_per_image"] / 1e9 for k, v in FL.items() if isinstance(v, dict) and "flops_per_image" in v})
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def code_int(fname, pattern):
+    """An integer constant of the training code (batch sizes), read from its source so that it cannot drift from it."""
+    m = re.search(pattern, open(os.path.join(HERE, fname)).read(), re.S)
+    if not m:
+        raise SystemExit(f"{fname}: pattern {pattern!r} not found")
+    return int(m.group(1))
+
+
+BS_REPRO = code_int("s8_vertibench_repro.py", r"for i in range\(0, len\(perm\), (\d+)\)")  # SplitNN, VertiBench recipe: batch 32
+BS_CLIPB = code_int("s22_vb_audit.py", r'PE_SPLIT_BS", "(\d+)"')  # CLIP-B split learning on VertiBench (default, no chain overrides it)
+BS_MILK = code_int("s11_milk10k.py", r"epochs=epochs_of\(kind\), bs=(\d+)")  # MILK10k split learning
+BS_HEAD = code_int("pe_common.py", r"def train_head\(.*?\bbs=(\d+)")  # train_head (frozen-feature heads, four-logit head)
+if any("PE_SPLIT_BS" in open(os.path.join(HERE, f)).read() for f in os.listdir(HERE) if f.endswith(".sh")):
+    raise SystemExit("a chain script overrides PE_SPLIT_BS: read the batch size of vb_split_clipb.json from it")
+# MILK10k folds (s11.folds: test = fold f, validation = fold f+1, training = the other three)
+_fc = [sum(c) for c in (milk.get("fold_test_counts") or [])]
+N_TR_MILK = [milk["n_lesions"] - _fc[f] - _fc[(f + 1) % len(_fc)] for f in range(len(_fc))] if _fc else []
+
+
+def n_batches(n, bs):
+    """Mini-batches per epoch of the training loops (range(0, n, bs), a last batch of one sample is skipped)."""
+    return n // bs + (1 if n % bs >= 2 else 0)
+
+
+# Sequential messages until the model is trained (one-way, party <-> server; synchronous steps, any number of parties in parallel):
+#   one upload = 1; split learning / logit heads = epochs x (2 per training mini-batch: activations or logits up, gradients down,
+#   + 1 per epoch for the validation pass when the recipe has one); frozen bottoms = 1 per mini-batch (no gradients down);
+#   HE ridge = 1 upload + 2 per decryption round trip (aggregates; validation scores), + 1 for the encrypted class weights on MILK10k.
+#   Interactive key generation (threshold CKKS) and inference are not counted.
+def msgs_split(E, nb, val=True, grads=True):
+    return E * (nb * (2 if grads else 1) + (1 if val else 0))
 
 NAME = {"dinov2_g_224": "DINOv2-g", "dinov2_l_224": "DINOv2-L", "dinov2_b_224": "DINOv2-B", "dinov2_s_224": "DINOv2-S", "clip_l14_224": "CLIP-L",
         "clip_b16_224": "CLIP-B", "siglip_b16_224": "SigLIP-B", "resnet50_in1k_224": "ResNet-50 (ImageNet, supervised)",
@@ -128,16 +166,21 @@ FAM_LONG = {"fm_oneshot": "foundation one-shot frozen", "fm_pca": "foundation on
 P = []  # all points
 
 
-def add(bench, name, fam, s, key, nbytes, rounds, backprop, sees, source, *, table=None, macros=(), cost_note="", encoder="", in_set=True,
-        val_selected="", mean=None, std=None, n=None, extra_bytes=None, label=None):
-    """One method = one point.  s: summary dict of the results (mean, per-seed values or std), key: 'acc' or 'f1'."""
+def add(bench, name, fam, s, key, nbytes, epochs, backprop, sees, source, *, table=None, macros=(), cost_note="", encoder="", in_set=True,
+        val_selected="", mean=None, std=None, n=None, extra_bytes=None, label=None, msgs=1, msgs_rule="one upload", gflops=None, gflops_rule="",
+        cacheable=False):
+    """One method = one point.  s: summary dict of the results (mean, per-seed values or std), key: 'acc' or 'f1'.
+    epochs: passes over the training data with interaction (1 for one upload); msgs: sequential messages (rule above msgs_split);
+    gflops: party-side GFLOPs per training image of one party, forward and backward (3 x forward for a training step, as tab_main);
+    cacheable: the party-side compute is one forward pass of a frozen encoder, reusable for any head or task."""
     m = s[key] if s is not None else mean
     e = sd(s, key) if s is not None else std
     nn = (s.get("n") or len(s.get(key + "s", [])) or None) if s is not None else n
     P.append(dict(benchmark=bench, name=name, family=FAM_LONG[fam], fam=fam, uses_foundation=FAM[fam][3], encoder=encoder,
                   metric="test accuracy (%)" if key == "acc" else "macro F1 (%)", metric_mean=float(m), metric_std=float(e), n_runs=nn,
-                  bytes_per_sample=float(nbytes), bytes_human=size(nbytes).replace("\\,", " "), rounds=rounds, party_backprop=backprop,
-                  party_backprop_bool=backprop != "none", server_sees=sees, val_selected=val_selected, in_pareto_set=in_set,
+                  bytes_per_sample=float(nbytes), bytes_human=size(nbytes).replace("\\,", " "), epochs=epochs, rounds=msgs, rounds_rule=msgs_rule,
+                  party_gflops=None if gflops is None else float(gflops), gflops_rule=gflops_rule, party_compute_cacheable=cacheable,
+                  party_backprop=backprop, party_backprop_bool=backprop != "none", server_sees=sees, val_selected=val_selected, in_pareto_set=in_set,
                   cost_note=cost_note, aggregate_bytes_per_sample_not_counted=extra_bytes, source=source, table=table or "", label=label or name,
                   _check=(table, pm(s, key) if s is not None else f"{m:.1f}\\,{{\\scriptsize$\\pm${e:.1f}}}", size(nbytes)), _macros=macros))
 
