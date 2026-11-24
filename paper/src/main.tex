@@ -15,8 +15,8 @@
 \InputIfFileExists{gen/macros.tex}{}{} % every number quoted in the text, generated from paper_results/
 
 \begin{document}
-\title{One Upload of Frozen Foundation Features: a Strong and Cheap Baseline for Image Vertical Federated Learning}
-\titlerunning{Frozen foundation features for one-shot VFL}
+\title{Foundation Models and Natural Benchmarks for Image Vertical Federated Learning: When Is One Upload Enough?}
+\titlerunning{Foundation models and natural benchmarks for image VFL}
 \author{Xavier Desprez \and Oudom Kem}
 \authorrunning{X. Desprez and O. Kem}
 \institute{Universit\'e Paris-Saclay, CEA, List, F-91120 Palaiseau, France\\
@@ -28,9 +28,13 @@
 \input{sec_related}
 \input{sec_method}
 \input{sec_setup}
-\input{sec_results}
+\input{sec_frontier}
+\input{sec_server}
 \input{sec_discussion}
 
 \bibliographystyle{splncs04}
 \bibliography{refs}
+
+\appendix
+\InputIfFileExists{sec_appendix.tex}{}{}
 \end{document}
