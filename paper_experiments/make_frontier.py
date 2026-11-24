@@ -341,6 +341,7 @@ for k, fam, lab in (("resnet18", "nf_split", "ResNet-18, scratch (split)"), ("re
     E = s["epochs"]  # training passes only (activations up, gradients down), as in Table 1: 3,144 training, 1,048 val. and test lesions
     up = s["bytes_per_train_sample"] * 2 * E * 3144 / (2 * E * 3144 + E * 1048 + 1048)
     nb = float(np.mean([n_batches(n, BS_MILK) for n in N_TR_MILK]))
+    nb = int(nb) if nb.is_integer() else nb
     fk = "milk_resnet18_224px" if k.startswith("resnet18") else k.rsplit("_", 1)[0] + "_224"  # MILK10k images are 224 px (s11 SIZE)
     add(MK, lab, fam, s, "f1", up, E, {"nf_split": "full ResNet-18 bottom", "fm_split_lora": "LoRA adapters (r=16)", "fm_split_ft": "full ViT backbone"}[fam],
         "activations + gradients", f"milk_split.json:{k}", table="tab_freeze.tex", encoder=lab.split(",")[0],
@@ -354,6 +355,7 @@ for k, mt in (("dinov2_b_frozen", "srFrozenB"), ("clip_b16_frozen", "srFrozenCb"
     E = s["epochs"]
     up = s["bytes_per_train_sample"] * 2 * E * 3144 / (2 * E * 3144 + E * 1048 + 1048) / 2  # frozen bottoms need no gradients (rule of tab_main)
     nb = float(np.mean([n_batches(n, BS_MILK) for n in N_TR_MILK]))
+    nb = int(nb) if nb.is_integer() else nb
     add(MK, f"{NAME[k.rsplit('_', 1)[0]]}, frozen bottoms (split)", "fm_split_frozen", s, "f1", up, E, "none", "activations (augmented views)",
         f"milk_split_v2.json:{k}", macros=((mt, f"{s['f1']:.1f}"),), encoder=NAME[k.rsplit("_", 1)[0]],
         cost_note="derived: formula of tab_freeze, halved for frozen bottoms as tab_main (no table shows this upload)", msgs=msgs_split(E, nb, grads=False),
@@ -591,6 +593,165 @@ fig.savefig(os.path.join(OUT, "fig_frontier.pdf"))
 fig.savefig(os.path.join(OUT, "fig_frontier.png"), dpi=220)
 plt.close(fig)
 print("wrote fig_frontier.pdf, fig_frontier.png")
+
+# ------------------------------------------------------------------ the same frontier on other axes: fig_frontier_axes.pdf (VertiBench), _milk.pdf
+# (a) bytes (as fig_frontier), (b) sequential messages, (c) party-side GFLOPs per training image, (d) exposure ladder (ordinal, jittered)
+AXES = {
+    "bytes": dict(x=lambda p: p["bytes_per_sample"], low=True, base=2, xlim=(20, 2.6 * MiB), xlabel="bytes exchanged per sample (all parties)",
+                  ticks=([32, KiB, 32 * KiB, MiB], ["32 B", "1 KiB", "32 KiB", "1 MiB"]), title="(a) communication volume"),
+    "rounds": dict(x=lambda p: p["rounds"], low=True, base=10, xlim=(0.6, 3e4), xlabel="sequential messages until trained",
+                   ticks=([1, 10, 100, 1000, 10000], ["1", "10", "100", "1k", "10k"]), title="(b) interaction"),
+    "gflops": dict(x=lambda p: p["party_gflops"], low=True, base=10, xlim=(4, 9000), xlabel="party GFLOPs per training image (fwd + bwd)",
+                   ticks=([10, 100, 1000], ["10", "100", "1000"]), title="(c) party-side compute"),
+    "exposure": dict(x=lambda p: p["exposure_rank"], low=False, base=None, xlim=(-0.6, len(EXPO) - 0.4), xlabel="what the server sees (most to least exposed)",
+                     ticks=(list(range(len(EXPO))), EXPO_TICK), title="(d) exposure of the parties' data"),
+}
+
+
+def jitter(pts):
+    """Deterministic spread of the points of one exposure level, in increasing upload size (left: smallest)."""
+    out = {}
+    for r in {p["exposure_rank"] for p in pts}:
+        q = sorted((p for p in pts if p["exposure_rank"] == r), key=lambda p: (p["bytes_per_sample"], p["metric_mean"]))
+        for i, p in enumerate(q):
+            out[id(p)] = r + (0.0 if len(q) == 1 else -0.32 + 0.64 * i / (len(q) - 1))
+    return out
+
+
+def frontier_panel(ax, bench, axis, yl):
+    """One panel of fig_frontier_axes; returns the points it cannot show (below the y-range, no x value) for the figure's footnote."""
+    A = AXES[axis]
+    allp = [p for p in P if p["benchmark"] == bench and p["in_pareto_set"]]
+    pts = [p for p in allp if A["x"](p) is not None]
+    nox = [p for p in allp if A["x"](p) is None]
+    lo, hi = yl
+    jx = jitter(pts) if axis == "exposure" else {}
+    xp = (lambda p: jx[id(p)]) if axis == "exposure" else A["x"]
+    for p in pts:
+        p["_x"] = xp(p)
+    if axis == "bytes" and bench == VB:  # validation-selected PCA / quantisation curve, as fig_frontier
+        pc = sorted([p for p in pts if p["fam"] == "fm_pca"], key=lambda p: p["bytes_per_sample"])
+        ax.plot([p["bytes_per_sample"] for p in pc], [p["metric_mean"] for p in pc], color=C["green"], lw=0.8, zorder=2)
+    fr = pareto_by(pts, A["x"], A["low"])
+    assert {id(p) for p in fr} == {id(p) for p in pts if p["pareto" if axis == "bytes" else "pareto_" + axis]}, (bench, axis)
+    if axis == "exposure":  # best metric at this level of exposure or a lower one: a non-increasing staircase
+        env = [max((p["metric_mean"] for p in pts if p["exposure_rank"] >= r), default=np.nan) for r in range(len(EXPO))]
+        xs_, ys_ = [], []
+        for r, v in enumerate(env):
+            xs_ += [r - 0.5, r + 0.5]
+            ys_ += [v, v]
+        ax.plot(xs_, ys_, color="k", lw=0.7, ls=(0, (3, 2)), zorder=1)
+    else:
+        xs, ys = [A["x"](p) for p in fr], [p["metric_mean"] for p in fr]
+        ax.step(xs + [A["xlim"][1]], ys + [ys[-1]], where="post", color="k", lw=0.7, ls=(0, (3, 2)), zorder=1)
+    below = []
+    for fam, (_lab, mk, col, fm) in FAM.items():
+        q = [p for p in pts if p["fam"] == fam]
+        vis = [p for p in q if p["metric_mean"] >= lo]
+        below += [p for p in q if p["metric_mean"] < lo]
+        if not vis:
+            continue
+        x, y, e = np.array([p["_x"] for p in vis]), np.array([p["metric_mean"] for p in vis]), np.array([p["metric_std"] for p in vis])
+        ax.errorbar(x, y, yerr=e, fmt="none", ecolor=col if fm else C["grey"], elinewidth=0.5, alpha=0.45, capsize=0, zorder=2)
+        ms = 12 if fam == "fm_pca" else (26 if mk in "PX" else 20)
+        if fm:
+            ax.scatter(x, y, s=ms, marker=mk, c=col, edgecolors="white", linewidths=0.4, zorder=3)
+        else:
+            ax.scatter(x, y, s=ms, marker=mk, facecolors="white", edgecolors=col, linewidths=0.9, zorder=3)
+    ax.scatter([p["_x"] for p in fr], [p["metric_mean"] for p in fr], s=58, facecolors="none", edgecolors="k", linewidths=0.6, zorder=4)
+    if A["base"]:
+        ax.set_xscale("log", base=A["base"])
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        ax.tick_params(axis="x", which="minor", length=1.5)
+        if A["base"] == 2:
+            ax.set_xticks([2.0 ** i for i in range(5, 22)], minor=True)
+    ax.set_xlim(*A["xlim"])
+    ax.set_ylim(lo, hi)
+    ax.set_xticks(A["ticks"][0])
+    ax.set_xticklabels(A["ticks"][1])
+    ax.tick_params(labelsize=6.5)
+    if axis == "exposure":
+        ax.tick_params(axis="x", labelsize=5.2, length=0)
+        ax.grid(False, axis="x")
+    ax.grid(True, which="major", axis="y" if axis == "exposure" else "both", alpha=0.25)
+    ax.set_xlabel(A["xlabel"], fontsize=6.5)
+    ax.set_title(A["title"], fontsize=7, loc="left")
+    return below, nox
+
+
+NOTE = dict(fontsize=4.8, color="#555555")
+DIM = re.compile(r"(PCA-\d+|full)")
+
+
+def axes_figure(bench, yl, yl_exp, one_y, fname):
+    """2 x 2 panels; one_y: height (data units) of the "one upload" pointer in (b), in a gap of the HE column."""
+    H = 5.3
+    fig, axs = plt.subplots(2, 2, figsize=(4.8, H))
+    foot = []
+    for i, (ax, axis) in enumerate(zip(axs.flat, AXES, strict=True)):
+        below, nox = frontier_panel(ax, bench, axis, yl_exp if axis == "exposure" else yl)
+        if below:
+            fams = ", ".join(sorted({FAM[p["fam"]][0] for p in below}))
+            foot.append(f"({'abcd'[i]}) {len(below)} points below the y-range ({fams}, "
+                        f"{min(p['metric_mean'] for p in below):.0f}–{max(p['metric_mean'] for p in below):.0f} %)")
+        if nox:
+            foot.append(f"({'abcd'[i]}) not shown, no FLOPs recorded: " + ", ".join(p["name"].split(",")[0] for p in nox))
+        if axis == "exposure":
+            ax.tick_params(axis="x", pad=1.5)
+    # merge "(a) 7 points below ... (b) 7 points below ..." into "(a)-(c) 7 points below ..."
+    merged = {}
+    for f in foot:
+        merged.setdefault(f[4:], []).append(f[1])
+    foot = [(f"({k[0]})" if len(k) == 1 else f"({k[0]})–({k[-1]})") + " " + t for t, k in merged.items()]
+    pts = [p for p in P if p["benchmark"] == bench and p["in_pareto_set"]]
+    have = {p["fam"] for p in pts}
+    miss = [FAM[f][0] for f in ("fm_dp", "fm_logits") if f not in have and any(q["fam"] == f for q in P)]
+    if miss:
+        foot.append("not run on this benchmark yet: " + ", ".join(miss))
+    ylab = "test accuracy (%)" if bench == VB else "macro F1 (%)"
+    for ax in axs[:, 0]:
+        ax.set_ylabel(ylab, fontsize=7)
+    # (b): the one-upload column
+    axs[0, 1].annotate("one upload", (1, one_y), xytext=(12, one_y), textcoords="data", va="center", fontsize=5.8, style="italic", color="#333333",
+                       arrowprops=dict(arrowstyle="-|>", lw=0.5, color="#444444", shrinkA=1, shrinkB=4, mutation_scale=5))
+    # (c): what is cacheable
+    axs[1, 0].text(0.02, 0.45, "frozen encoders:\none forward pass\nper image, cacheable", transform=axs[1, 0].transAxes, ha="left", va="top", **NOTE)
+    # (d): best HE point, order inside the DP columns, and what PCA buys under DP
+    ax = axs[1, 1]
+    he = max((p for p in pts if p["fam"] == "fm_he"), key=lambda p: p["metric_mean"], default=None)
+    if he:
+        ax.annotate(", ".join(he["name"].split(", ")[:2]), (he["_x"], he["metric_mean"]), xytext=(-3, 6), textcoords="offset points", ha="right",
+                    va="bottom", **NOTE)
+    dp = {(p["exposure_rank"], DIM.search(p["name"]).group(1)): p for p in pts if p["fam"] == "fm_dp"}
+    for r in {r for r, _ in dp}:
+        order = [d for (_, d) in sorted(((dp[k]["_x"], k[1]) for k in dp if k[0] == r))]
+        assert order == ["PCA-16", "PCA-64", "full"], order  # the note below states this order
+    if dp:
+        ax.text(0.02, 0.03, "DP columns, left to right:\nPCA-16, PCA-64, full dim.", transform=ax.transAxes, ha="left", va="bottom", **NOTE)
+    if (4, "full") in dp and (4, "PCA-16") in dp:
+        a, b = dp[(4, "full")], dp[(4, "PCA-16")]
+        ax.annotate("", (b["_x"], b["metric_mean"]), xytext=(a["_x"], a["metric_mean"]),
+                    arrowprops=dict(arrowstyle="-|>", lw=0.5, color="#444444", shrinkA=3, shrinkB=3, mutation_scale=5))
+        ax.text(4.15, (a["metric_mean"] + b["metric_mean"]) / 2, f"PCA-16 vs full:\n+{b['metric_mean'] - a['metric_mean']:.0f} pts", ha="left",
+                va="center", style="italic", **NOTE)
+    for r in range(len(EXPO)):
+        if not any(p["exposure_rank"] == r for p in pts):
+            ax.text(r, yl_exp[0] + 0.04 * (yl_exp[1] - yl_exp[0]), "not\nrun", ha="center", va="bottom", fontsize=4.6, color="#888888", style="italic")
+    fig.suptitle(bench + (" (16 parties)" if bench == VB else " (2 parties)"), fontsize=7.5, y=0.995)
+    fig.text(0.01, 0.66 / H, "\n".join(foot), ha="left", va="bottom", **NOTE)
+    fig.legend(handles=H1, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 0.26 / H), title="foundation model (filled markers)", **kw)
+    fig.legend(handles=H2, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 0.0), title="no foundation model (hollow markers)", **kw)
+    fig.tight_layout(rect=(0, 0.8 / H, 1, 0.985), w_pad=1.0, h_pad=0.6)
+    fig.savefig(os.path.join(OUT, fname + ".pdf"), metadata={"CreationDate": None})
+    fig.savefig(os.path.join(OUT, fname + ".png"), dpi=220)
+    plt.close(fig)
+    for p in P:
+        p.pop("_x", None)
+    print(f"wrote {fname}.pdf, {fname}.png")
+
+
+axes_figure(VB, YL[VB], (50.0, 88.5), 80.75, "fig_frontier_axes")
+axes_figure(MK, YL[MK], (38.0, 65.5), 46.5, "fig_frontier_axes_milk")
 
 # ------------------------------------------------------------------ macros
 MAC = {}
