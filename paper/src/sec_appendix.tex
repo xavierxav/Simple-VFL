@@ -39,12 +39,6 @@ Encoder & Params & GFLOPs & $d$ & Acc. (\%) & F1 (\%) & Linear acc. (\%)\\
 
 \FloatBarrier
 
-\IfFileExists{gen/fig_frontier_axes.pdf}{%
-\begin{figure}[t]
-\centering\includegraphics[width=\linewidth]{gen/fig_frontier_axes.pdf}
-\caption{The frontier of Fig.~\ref{fig:frontier} along the other axes of the cost accounting (Sec.~\ref{sec:accounting}): party compute, synchronised rounds and what the server receives.}\label{fig:frontier-axes}
-\end{figure}}{}
-
 \section{Compression grid}\label{app:pca}
 
 This appendix supports contribution C1: it gives the full grid of local PCA and quantisation from which the main text takes the knee of the frontier, and the limits of compressing without coordination.
@@ -92,7 +86,7 @@ Image fingerprints match \auMapTrain{} training and \auMapTest{} test samples to
 The split is not grouped by site, however: \auSibN{} test samples (\auSibShare\,\%) have a training tile from the same site, all from the two sources whose sites are cut into $3\times3$ tiles. They account for \auSibN{} of the 113 test samples in classes 0 and 1, so the \auNoSibN{} test samples without a known sibling are almost all of classes 2 and 3, and class and sibling effects cannot be separated. Table~\ref{tab:audit} gives each head's accuracy on the two subsets. SplitNN is markedly more accurate with siblings (\auSnSib{} vs.\ \auSnNoSib\,\%); the one-shot heads are similarly accurate on both (CLIP-L: \auClipSib{} vs.\ \auClipNoSib\,\%), and the four-logit CLIP heads and frozen split learning are \emph{less} accurate with siblings. The margins over SplitNN are therefore larger on the subset without siblings.
 
 \paragraph{Paired tests.}
-The three-seed SplitNN re-run that retains test probabilities averages \auSnAll\,\% accuracy, versus \reproAcc\,\% over five seeds in Table~\ref{tab:main}. We pair test predictions after averaging probabilities over the same three seeds per method (exact McNemar test and 95\,\% paired bootstrap interval, 10{,}000 resamples). On the whole test set, the two CLIP one-shot MLPs, the three four-logit heads and CLIP-B split learning with LoRA beat SplitNN at the 5\,\% level; DINOv2-g's one-shot MLP ($+\pairSnGDiff$ points, $p\pairSnGP$) and frozen CLIP-B split learning do not (Table~\ref{tab:audit}). Without known siblings every margin grows and all are significant. These $p$-values are not corrected for the eight comparisons.
+The three-seed SplitNN re-run that retains test probabilities averages \auSnAll\,\% accuracy, versus \reproAcc\,\% over five seeds in Table~\ref{tab:main}. We pair test predictions after averaging probabilities over the same three seeds per method (exact McNemar test and 95\,\% paired bootstrap interval, 10{,}000 resamples). On the whole test set, the two CLIP one-shot MLPs, the three four-logit heads and CLIP-B split learning with LoRA beat SplitNN at the 5\,\% level; DINOv2-g's one-shot MLP ($+\pairSnGDiff$ points, $p\pairSnGP$) and frozen CLIP-B split learning do not (Table~\ref{tab:audit}). In detail, the CLIP-L, CLIP-B and DINOv2-g one-shot heads gain $\pairSnClipDiff$ ($p\pairSnClipP$), $\pairSnClipBDiff$ ($p\pairSnClipBP$) and $\pairSnGDiff$ points ($p\pairSnGP$); the CLIP-L, DINOv2-g and CLIP-B four-logit heads give $p\pairSnLgClipP$, $p\pairSnLgGP$ and $p\pairSnLgClipBP$, LoRA split learning $p\pairSnLoraP$ and frozen split learning $p\pairSnSplitFrozenP$. Without known siblings every margin grows and all are significant (CLIP-L: $\pairSnClipNoSibDiff$ points, $p\pairSnClipNoSibP$). These $p$-values are uncorrected: after a Holm correction over the \holmN{} comparisons, \holmSurvive{} remain below 0.05, LoRA split learning and the CLIP-B four-logit head. LoRA itself is unstable across seeds (\seedLoraMin{} to \seedLoraMax\,\%); paired with the ensemble of the one-shot CLIP-B head on the same seeds, its lead is $\pairLoraHeadDiff$ points ($[\pairLoraHeadLo,\pairLoraHeadHi]$, $p\pairLoraHeadP$).
 
 \paragraph{Nearest public image.}
 The retrieval attacker of App.~\ref{app:privacy} does not owe its success to siblings: across test uploads, the label of the nearest public training image in CLIP-L space matches in \nnPubAll\,\% of the cases (\nnPubSib\,\% with known siblings, \nnPubNoSib\,\% without), and the neighbour is itself a sibling in just \nnPubIsSib\,\% of the sibling cases, about 5\,\% overall.
@@ -129,7 +123,12 @@ Split learning, CLIP-B LoRA & \auLoraAll & \auLoraSib & \auLoraNoSib & $\pairSnL
 
 \section{MILK10k details}\label{app:milk}
 
-This appendix supports contribution C1: it gives the party combinations, fusion heads and regularisation checks behind the frozen MILK10k rows of Table~\ref{tab:freeze}, and the same-recipe comparison of frozen and adapted backbones.
+This appendix supports contribution C1: it gives the party combinations, fusion heads and regularisation checks behind the frozen MILK10k rows of Table~\ref{tab:freeze}, and the same-recipe comparison of frozen and adapted backbones. Figure~\ref{fig:frontier-axes-milk} places the MILK10k points on the other axes of the cost accounting: one-shot points need \frMilkRoundsMatch{} message against \frMilkRoundsSplitNN{} for ResNet-18 split learning, and \frMilkGflopsMatchName{} exceeds that baseline (\frMilkGflopsMatchAcc{} vs.\ \frMilkBestNonFound\,\%) with \frMilkGflopsRatio{} times less party compute.
+
+\begin{figure}[t]
+\centering\IfFileExists{gen/fig_frontier_axes_milk.pdf}{\includegraphics[width=\linewidth]{gen/fig_frontier_axes_milk.pdf}}{\fbox{\parbox{0.9\linewidth}{\centering fig\_frontier\_axes\_milk pending}}}
+\caption{MILK10k along the axes of Fig.~\ref{fig:frontier-axes}: (a)~bytes per training sample, (b)~sequential messages until trained, (c)~party GFLOPs per training image (forward and backward), (d)~exposure ladder. DP and the four-logit head are marked as not run. Circled: Pareto-optimal points.}\label{fig:frontier-axes-milk}
+\end{figure}
 
 \paragraph{Real modalities complement each other little.}
 The dermoscopic image alone gives \milkGDerm\,\% macro F1 with DINOv2-g, the clinical photograph \milkGClin\,\%, the metadata \milkMeta\,\% (Table~\ref{tab:milk}). Concatenating the two images adds less than one point over the dermoscopy (\milkGBoth\,\%), three points with CLIP-L (\milkCDerm{} $\to$ \milkCBoth\,\%); the metadata add at most one point on top. The general-purpose encoders match or beat the medical ones (BiomedCLIP, MONET). Splitting the dermoscopy into two halves, as split benchmarks do, \emph{loses} information instead: \milkGHalves\,\% against \milkGDerm\,\% for the whole image, because each party's encoder sees half a lesion. Two caveats apply to all MILK10k numbers: folds are drawn over lesions, as the release has no patient identifiers, and each test fold holds only 40 to 61 lesions of the two rarest classes.
@@ -311,6 +310,23 @@ The rotation costs nothing (\gdRotAcc\,\% accuracy against \gdPlainAcc\,\%), the
 Party $k$ clips each vector (raw or after PCA) at the median $\ell_2$ norm $c_k$ of its own training vectors and adds noise $\mathcal{N}(0,\sigma_k^2 I)$. For fixed preprocessing and $c_k$, replacing one record changes the clipped vector by at most $2c_k$, so each release is $\mu$-Gaussian-DP with $\mu=2c_k/\sigma_k$~\cite{dong2022gdp}; we set $\sigma_k$ from a target per-upload $(\varepsilon,\delta=10^{-5})$. The 16 uploads of a sample compose to $4\mu$: a per-upload $\varepsilon=8$ gives $\varepsilon\approx50$ for the sample, and $\varepsilon=64$ gives $\varepsilon\approx630$. These budgets do not account for estimating the clipping norms or fitting the PCA on the training data: the guarantee is formal but loose. Because the clipped signal has a fixed norm while the noise norm grows with the square root of the dimension, PCA is what makes DP usable. On VertiBench with DINOv2-g, a per-upload $\varepsilon=8$ drops the full features to \dpFullEight\,\%, below the \majVB\,\% of always predicting the majority class (the inversion PSNR is then that of the mean training image to the reported precision, and re-identification is near chance; Table~\ref{tab:privacy}), whereas after PCA-16 the same budget keeps \dpStEight\,\%, above it. At $\varepsilon=64$, full features give \dpFullSsf\,\%, PCA-64 \dpSfSsf\,\% and PCA-16 \dpStSsf\,\% (PCA-64 at $\varepsilon=8$: \dpSfEight\,\%). PCA followed by DP is thus the privacy end of the frontier: a formal, loose guarantee at an accuracy cost, whereas the reproduced SplitNN, at \reproAcc\,\%, offers no formal guarantee.
 
 \subsection{Encrypted training of a linear head}
+
+\begin{table}[tbp]
+\caption{Heads that can be trained on encrypted uploads: accuracy (VertiBench, CIFAR) or macro F1 (MILK10k, WorldStrat), mean\,$\pm$\,std over 5 seeds or folds (CIFAR: 3 seeds). MLP: reference head re-run in the ridge pipeline (hence tenths of a point from Table~\ref{tab:main}). Ridge: closed form on standardised features (class-weighted on MILK10k and WorldStrat), emulated in plaintext, after a per-party PCA to 256, 64 or 16 components; --: too large to emulate.}\label{tab:he}
+\centering\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+& \multicolumn{2}{c}{Full features} & \multicolumn{3}{c}{Ridge after per-party PCA}\\
+\cmidrule(lr){2-3}\cmidrule(lr){4-6}
+Task & MLP & Ridge & 256 & 64 & 16\\
+\midrule
+\inputtab{gen/tab_he.tex}
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
 
 \paragraph{Protocol.}
 After a local PCA to $d'$ components and standardisation, the ridge classifier $W=(X^\top X+\lambda I)^{-1}X^\top Y$ on one-hot targets only needs $X^\top X$ and $X^\top Y$. Every party encrypts its feature columns once with CKKS under a threshold key generated jointly by the parties~\cite{mouchet2021multiparty} (a single key shared by the passive parties would let each of them decrypt the others' uploads); the label owner computes the cross-party blocks $X_k^\top X_l$ and $X_k^\top Y$ homomorphically (multiplicative depth one), masks them with random matrices, has them decrypted and solves the system in the clear: one upload plus one round trip of $\mathcal{O}(D^2)$ aggregates, $D=Kd'$, and no per-sample feature is ever decrypted. With class weights, which depend on the labels, the label owner also sends the encrypted per-sample weights; every party multiplies its columns by them, uploads these weighted columns as well and computes its own weighted Gram block with ciphertext--plaintext products (depth two). The regularisation $\lambda$ is chosen on validation predictions, which the label owner obtains by applying each candidate model to the encrypted validation uploads and decrypting only the scores. The protocol reveals the second-order statistics of the features to the label owner, as the closed-form protocols of~\cite{gascon2017privacy,huang2026vafl}, and does not protect the trained model or its predictions. An encrypted logistic regression (a fixed number of full-batch Nesterov steps with the degree-3 polynomial sigmoid of~\cite{kim2018logistic}) would reveal only the model but needs bootstrapping or a refresh of the encrypted weights every few iterations~\cite{kim2018logistic,han2019logistic}; its accuracy depends on that budget and is not reported. We emulate the ridge in plaintext (CKKS adds relative errors of the order of $10^{-6}$) and time its homomorphic operations with a single key; the interactive key generation and collective decryption of threshold CKKS are not timed.
