@@ -1,13 +1,13 @@
 \multicolumn{7}{@{}l}{\emph{No foundation model}}\\
-Split learning (SplitNN) & ResNet-18, scratch & every batch & 81.1 & 1.56\,MiB & 39.8 & 120\,KiB\\
+Split learning$^c$ & ResNet-18, random init. & every batch & 81.1 & 1.56\,MiB & 39.8 & 120\,KiB\\
 Split learning & ResNet-18, ImageNet & every batch & 81.1 & 1.25\,MiB & 51.4 & 80\,KiB\\
 FedOnce & trained by each party & once & 78.5 & 16\,KiB & -- & --\\
 \midrule
 \multicolumn{7}{@{}l}{\emph{Public foundation encoder}}\\
-Split learning, LoRA & ViT-B, adapted & every batch & 84.1 & 480\,KiB & 63.6 & 60\,KiB\\
+Split learning, LoRA & CLIP-B / DINOv2-B & every batch & 84.1 & 480\,KiB & 63.6 & 60\,KiB\\
 Logit heads & DINOv2-g, frozen & every batch & 85.0 & 6\,KiB & 58.6 & 1\,KiB\\
 One upload (ours) & CLIP-L / DINOv2-g$^a$ & once & 85.2 & 32\,KiB & 60.5 & 6\,KiB\\
-\quad + local PCA, small & DINOv2-g & once & 81.2 & 64\,B & 54.0 & 64\,B\\
-\quad + local PCA, knee & DINOv2-g & once & 85.6 & 2\,KiB & 58.2 & 768\,B\\
-\quad + encrypted ridge & CLIP-L / DINOv2-g & once$^b$ & 83.4 & 496\,KiB & 57.6 & 633\,KiB\\
+\quad + compression, small & DINOv2-g & once & 81.2 & 64\,B & 54.0 & 64\,B\\
+\quad + compression, knee & DINOv2-g & once & 85.6 & 2\,KiB & 58.2 & 768\,B\\
+\quad + encrypted ridge & CLIP-L / DINOv2-g$^b$ & once$^b$ & 82.1 & 124\,KiB & 57.6 & 633\,KiB\\
 \quad + DP noise, $\varepsilon=8$ & DINOv2-g, PCA-16 & once & 62.1 & 512\,B & -- & --\\

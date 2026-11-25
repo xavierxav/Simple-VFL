@@ -607,7 +607,7 @@ if RN_PCA:
     H2[[f for f in FAM if not FAM[f][3]].index("nf_pca")] = Line2D([], [], ls="-", lw=0.6, marker="o", ms=3.4, color=C["grey"], mfc="white",
                                                                   mec=C["grey"], mew=0.9, label=FAM["nf_pca"][0])
 H2.append(Line2D([], [], ls=(0, (3, 2)), lw=0.7, color="k", marker="o", ms=6, mfc="none", mec="k", mew=0.6,
-                 label="Pareto front" if RN_PCA else "Pareto-optimal (front)"))
+                 label="envelope (circled: on it)"))
 NC2 = len(H2) if RN_PCA else 4  # one row of hollow-marker entries
 kw = dict(frameon=False, fontsize=5.6, handletextpad=0.25, handlelength=1.3, columnspacing=0.8, borderaxespad=0.1, borderpad=0.1,
           title_fontsize=5.8, labelspacing=0.3, alignment="left")
@@ -898,16 +898,16 @@ def cell(bench, name):
 
 SUMMARY = [  # (approach, party encoder, exchanges, VertiBench point, MILK10k point); None: not run
     ("\\multicolumn{7}{@{}l}{\\emph{No foundation model}}", None, None, None, None),
-    ("Split learning (SplitNN)", "ResNet-18, scratch", "every batch", "SplitNN, VertiBench recipe (ResNet-18, 13 bands)", "ResNet-18, scratch (split)"),
+    ("Split learning$^c$", "ResNet-18, random init.", "every batch", "SplitNN, VertiBench recipe (ResNet-18, 13 bands)", "ResNet-18, scratch (split)"),
     ("Split learning", "ResNet-18, ImageNet", "every batch", "SplitNN, our recipe, ImageNet init. (RGB)", "ResNet-18, ImageNet (split)"),
     ("FedOnce", "trained by each party", "once", "FedOnce, SimCLR (13 bands)", None),
     ("\\multicolumn{7}{@{}l}{\\emph{Public foundation encoder}}", None, None, None, None),
-    ("Split learning, LoRA", "ViT-B, adapted", "every batch", "CLIP-B bottoms, LoRA (split)", "DINOv2-B, LoRA (split)"),
+    ("Split learning, LoRA", "CLIP-B / DINOv2-B", "every batch", "CLIP-B bottoms, LoRA (split)", "DINOv2-B, LoRA (split)"),
     ("Logit heads", "DINOv2-g, frozen", "every batch", "DINOv2-g, 4-logit MLP per party", "DINOv2-g, 7-logit MLP per party"),
     ("One upload (ours)", "CLIP-L / DINOv2-g$^a$", "once", "CLIP-L, frozen, one upload", "DINOv2-g, frozen, 8 views averaged, late fusion"),
-    ("\\quad + local PCA, small", "DINOv2-g", "once", "DINOv2-g, PCA-16, 2-bit", "DINOv2-g, PCA x bits up to 64 B (per-fold val. selection)"),
-    ("\\quad + local PCA, knee", "DINOv2-g", "once", "DINOv2-g, PCA-256, 4-bit", "DINOv2-g, PCA x bits up to 768 B (per-fold val. selection)"),
-    ("\\quad + encrypted ridge", "CLIP-L / DINOv2-g", "once$^b$", "CLIP-L, PCA-256, ridge trained under CKKS", "DINOv2-g, full, class-weighted ridge under CKKS"),
+    ("\\quad + compression, small", "DINOv2-g", "once", "DINOv2-g, PCA-16, 2-bit", "DINOv2-g, PCA x bits up to 64 B (per-fold val. selection)"),
+    ("\\quad + compression, knee", "DINOv2-g", "once", "DINOv2-g, PCA-256, 4-bit", "DINOv2-g, PCA x bits up to 768 B (per-fold val. selection)"),
+    ("\\quad + encrypted ridge", "CLIP-L / DINOv2-g$^b$", "once$^b$", "CLIP-L, PCA-64, ridge trained under CKKS", "DINOv2-g, full, class-weighted ridge under CKKS"),
     ("\\quad + DP noise, $\\varepsilon=8$", "DINOv2-g, PCA-16", "once", "DINOv2-g, PCA-16, DP eps=8 per upload", None),
 ]
 rows = []
@@ -1024,7 +1024,7 @@ for bench, t in ((VB, "Vb"), (MK, "Milk")):
 def choice_txt(k, ch):
     """Modal (d, bits) of the per-fold choices of a nested-selected MILK10k point, e.g. 'full, 2-bit, in 3 of 5 folds'."""
     (d, b), c = max(((tuple(x), ch.count(x)) for x in ch), key=lambda t: t[1])
-    return f"{'full' if d == mf[k]['dim'] else 'PCA-' + str(d)}, {b}-bit, in {c} of {len(ch)} folds"
+    return f"{'all dimensions' if d == mf[k]['dim'] else 'PCA-' + str(d)} at {b} bits in {c} of {len(ch)} folds"
 
 
 # MILK10k, s24 milk: few-round logit heads, the knee of the validation-selected PCA x bits points, the 64 B point

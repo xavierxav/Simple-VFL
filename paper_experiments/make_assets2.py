@@ -487,6 +487,13 @@ if msplit or milk:
             macro(f"fzGap{t}", f1(lo["f1"] - fr["f1"]))
             macro(f"fzGapViews{t}", f1(lo["f1"] - mrg["f1"]))
             macro(f"fzViews{t}", f1(mrg["f1"]))
+    # LoRA split learning (DINOv2-B) against the best one-upload point (DINOv2-g, 8 views, late fusion), paired by fold
+    lo, best = msplit.get("dinov2_b_lora"), (load("milk_reg.json") or {}).get("dinov2_g", {}).get("late fusion (fixed 0.5)|views mean")
+    if lo and best and len(lo.get("f1s", [])) == len(best.get("f1s", [])) > 1:
+        d = np.array(lo["f1s"]) - np.array(best["f1s"])
+        macro("fzLoraOverBest", f1(d.mean()))
+        macro("fzLoraOverBestSd", f1(d.std(ddof=1)))
+        macro("fzLoraOverBestWins", str(int((d > 0).sum())))
     write("tab_freeze.tex", "\n".join(rows))
 
 # ------------------------------------------------------------------ WorldStrat: sensors, labels, resolution
