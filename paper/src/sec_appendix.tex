@@ -5,6 +5,21 @@
 
 This appendix supports both contributions: it details the VertiBench baselines and the comparison of frozen encoders behind the foundation-model points of the frontier (C1), and shows how accuracy depends on the number of parties of this benchmark (C2).
 
+\begin{table}[tbp]
+\caption{VertiBench Satellite, all methods (16 parties, official test set). Upload: training payload per sample over all parties (activations or logits up, gradients down when needed). GFLOPs: party compute per image (a training run for split learning, one forward pass otherwise). Time: minutes on one A100 (split training, FedOnce pre-training or feature extraction). Mean\,$\pm$\,std over 5 seeds unless noted; --: not recorded.}\label{tab:main}
+\centering\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{@{}lcrrrccc@{}}
+\toprule
+Method & Bands & Upload & GFLOPs & Time & Acc. (\%) & F1 (\%) & AUC (\%)\\
+\midrule
+\inputtab{gen/tab_main.tex}
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
 \paragraph{Baselines.}
 Our re-implementation of the published VertiBench split-learning configuration reaches $\reproAcc\pm\reproStd$\,\% on the 13 bands after its last epoch, in line with the published $81.2\pm0.4$\,\% (Table~\ref{tab:main}). Our own split-learning recipe is weaker from scratch (\splitAllAcc\,\% on 13 bands, \splitRGBAcc\,\% on RGB) and matches it from ImageNet weights (\splitPTAcc\,\% on RGB). FedOnce, whose parties learn their encoder on their own unlabelled images before a single upload, reaches \natAcc\,\% with Noise As Targets and \sslAllAcc\,\% with SimCLR: on 3{,}142 training locations, self-supervised training does not produce better features than supervised split learning. Macro F1 and AUC order the frozen foundation encoders above these baselines as accuracy does, but not among themselves (CLIP-B has the best macro F1 and a lower accuracy than CLIP-L). No difference between the two best encoders is detected: on the same test predictions (seed-averaged probabilities), CLIP-L leads DINOv2-g by $\pairDiff$ points, 95\,\% bootstrap interval $[\pairLo, \pairHi]$, McNemar $p=\pairP$.
 
@@ -130,11 +145,26 @@ This appendix supports contribution C1: it gives the party combinations, fusion 
 \caption{MILK10k along the axes of Fig.~\ref{fig:frontier-axes}: (a)~bytes per training sample, (b)~sequential messages until trained, (c)~party GFLOPs per training image (forward and backward), (d)~exposure ladder. Only DP is marked as not run. Circled: Pareto-optimal points.}\label{fig:frontier-axes-milk}
 \end{figure}
 
+\begin{table}[tbp]
+\caption{MILK10k, all methods (2 parties, 5 folds, class-balanced loss). Split learning trains the bottoms with the server's gradients; one-shot rows use frozen features and an MLP head (concatenation, or late fusion on features averaged over 8 rotations and flips). Upload per training sample: over all training epochs for split learning (30 for ResNet-18 from scratch, 20 from ImageNet, 10 for ViTs), once for one-shot. Time: minutes per fold (one-shot: encoding, estimated).}\label{tab:freeze}
+\centering\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{@{}llrrrccc@{}}
+\toprule
+Party models & Training & Trainable & Upload & Time & F1 (\%) & Bal.\ acc.\ (\%) & Acc.\ (\%)\\
+\midrule
+\inputtab{gen/tab_freeze.tex}
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
 \paragraph{Real modalities complement each other little.}
 The dermoscopic image alone gives \milkGDerm\,\% macro F1 with DINOv2-g, the clinical photograph \milkGClin\,\%, the metadata \milkMeta\,\% (Table~\ref{tab:milk}). Concatenating the two images adds less than one point over the dermoscopy (\milkGBoth\,\%), three points with CLIP-L (\milkCDerm{} $\to$ \milkCBoth\,\%); the metadata add at most one point on top. The general-purpose encoders match or beat the medical ones (BiomedCLIP, MONET). Splitting the dermoscopy into two halves, as split benchmarks do, \emph{loses} information instead: \milkGHalves\,\% against \milkGDerm\,\% for the whole image, because each party's encoder sees half a lesion. Two caveats apply to all MILK10k numbers: folds are drawn over lesions, as the release has no patient identifiers, and each test fold holds only 40 to 61 lesions of the two rarest classes.
 
 \paragraph{How the parties are combined matters as much as the encoder.}
-A concatenation MLP under-uses the weaker party. Training one head per party and averaging their log-probabilities (late fusion) is better for every encoder (Table~\ref{tab:milkfusion}): \mfGLate\,\% instead of \mfGCat\,\% with DINOv2-g, \mfCLate\,\% instead of \mfCCat\,\% with CLIP-L, \mfGMLate\,\% when each party uploads DINOv2-g and MONET features; the clinical photograph then adds about three points to the dermoscopy. Late fusion also suits VFL: each party's head can be trained, audited and dropped independently. The gain is bounded by the data: \mfGBoth\,\% of the lesions are misclassified by both single-party heads, against \mfGIndep\,\% if their errors were independent---the two modalities fail on the same, intrinsically hard lesions.
+A concatenation MLP under-uses the weaker party. Training one head per party and averaging their log-probabilities (late fusion) is better for every encoder (Table~\ref{tab:milkfusion}): \mfGLate\,\% instead of \mfGCat\,\% with DINOv2-g, \mfCLate\,\% instead of \mfCCat\,\% with CLIP-L, \mfGMLate\,\% when each party uploads DINOv2-g and MONET features; with DINOv2-g, the two parties together then reach \mfGLate\,\%, about three points more than the dermoscopic party alone (\milkGDerm\,\%). Late fusion also suits VFL: each party's head can be trained, audited and dropped independently. The gain is bounded by the data: \mfGBoth\,\% of the lesions are misclassified by both single-party heads, against \mfGIndep\,\% if their errors were independent---the two modalities fail on the same, intrinsically hard lesions.
 
 \paragraph{Over-fitting or modality competition?}
 With 3{,}100 training lesions and 2--3k input dimensions, the concatenation head could simply over-fit. Three observations speak against this being the main cause (Table~\ref{tab:milkreg}). First, regularising it---input dropout, Gaussian feature noise, feature mixup, a per-party PCA---gains at most one point and never reaches late fusion. Second, late fusion does not need its tuned weight: a fixed weight of 0.5 does as well (\mrGLateHalf\,\% with DINOv2-g); paired by fold, it beats concatenation by \mrGPairD\,$\pm$\,\mrGPairS{} points with DINOv2-g (\mrGPairW{} folds out of 5), \mrCPairD\,$\pm$\,\mrCPairS{} with CLIP-L (\mrCPairW/5) and \mrMPairD\,$\pm$\,\mrMPairS{} with MONET (\mrMPairW/5). Third, its advantage does not shrink with more data, as over-fitting would predict: it grows from 25\,\% to 100\,\% of the training folds for CLIP-L and MONET. Nor is it an artefact of our early-stopping rule on the unweighted validation loss: when both heads stop on the class-weighted validation loss or on the validation macro F1, late fusion still wins by \mrStopMin{} to \mrStopMax{} points over \mrStopN{} comparisons (DINOv2-g, CLIP-L, DINOv2-B, CLIP-B; stopping on the weighted loss lowers every head by up to \mrWlossDropMax{} points), and weight decay on the concatenation head leaves a gap of \mrWdMin{} to \mrWdMax{} points. The pattern rather matches the \emph{modality competition} documented for jointly trained multimodal networks~\cite{wang2020makes,huang2022modality,peng2022balanced}: a joint head learns the dominant dermoscopy first and stops before exploiting the clinical photograph, whereas separate heads must each use their own modality fully; the validation-tuned late fusion gives the weaker clinical party a weight of 0.3 to 0.5. Augmentation helps in image space, not in feature space: the parties can encode the 8 rotations and flips of each photograph once (8 times the encoding cost) and upload the mean, which raises late fusion to \mrGLateViews\,\% (DINOv2-g), \mrMLateViews\,\% (MONET), \fzViewsB\,\% (DINOv2-B) and \fzViewsCb\,\% (CLIP-B) at no extra communication. With CLIP-L it helps late fusion little (\mrCLateViews\,\%); there the best head is the concatenation trained on one of the 8 uploaded views per epoch (\mrCCatSampled\,\%, at 8 times the upload).

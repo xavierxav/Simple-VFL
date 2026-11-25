@@ -179,7 +179,7 @@ for k, lab in (("clip_b16_lora", "CLIP ViT-B/16 bottoms, LoRA"), ("clip_b16_froz
 lg = [(k.split("|")[0], v) for k, v in aud.get("heads", {}).items() if k.split("|")[1].startswith("logits")]
 if lg:
     rows.append("\\midrule")
-    rows.append("\\multicolumn{8}{@{}l}{\\emph{Few rounds, frozen features: each party trains an MLP to 4 logits (logits up, their gradients down)}}\\\\")
+    rows.append("\\multicolumn{8}{@{}l}{\\emph{Logit heads, frozen features: each party trains an MLP to 4 logits (logits up, their gradients down, every mini-batch)}}\\\\")
     for k, v in sorted(lg, key=lambda kv: ["clip_l14_224", "dinov2_g_224", "clip_b16_224"].index(kv[0]) if kv[0] in ("clip_l14_224", "dinov2_g_224", "clip_b16_224") else 9):
         c = cost.get(k, {})
         gf = c.get("flops_per_image")

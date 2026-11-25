@@ -137,6 +137,23 @@ body = re.sub(r"\\institute\{.*?\}\n", "", body, flags=re.S)
 body = body.replace("\\maketitle", "")
 body = re.sub(r"\\keywords\{(.*?)\}", lambda m: "\n\n\\textbf{Keywords:} " + m.group(1).replace("\\and", "·"), body, flags=re.S)
 body = body.replace("\\begin{abstract}", "\\section*{Abstract}\n").replace("\\end{abstract}", "")
+# TikZ pictures -> PNG, compiled standalone with the packages of main.tex
+def tikz(m, n=[0]):
+    n[0] += 1
+    d = os.path.join(OUT, "tikz")
+    os.makedirs(d, exist_ok=True)
+    name = "tikz%d" % n[0]
+    open(os.path.join(d, name + ".tex"), "w", encoding="utf-8").write(
+        "\\documentclass[border=4pt]{standalone}\n\\usepackage[T1]{fontenc}\\usepackage{lmodern}\\usepackage{amsmath,amssymb}\n"
+        "\\usepackage{tikz}\\usetikzlibrary{arrows.meta,positioning,fit}\n" + macros + "\n\\begin{document}\n" + m.group(0) + "\n\\end{document}\n")
+    subprocess.run(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", name + ".tex"], cwd=d, check=True, capture_output=True)
+    subprocess.run(["pdftoppm", "-r", "220", "-png", "-singlefile", name + ".pdf", os.path.join(OUT, "fig", name)], cwd=d, check=True)
+    return "\\includegraphics{fig/%s.png}" % name
+
+
+body = re.sub(r"\\begin\{tikzpicture\}.*?\\end\{tikzpicture\}", tikz, body, flags=re.S)
+
+
 for cmd in ("FloatBarrier", "centering", "small", "footnotesize", "scriptsize", "clearpage", "newpage"):
     body = body.replace("\\" + cmd, "")
 body = re.sub(r"\\begin\{adjustbox\}\{[^}]*\}|\\end\{adjustbox\}", "", body)
@@ -156,6 +173,7 @@ def fig(m):
 
 
 body = re.sub(r"\\includegraphics(?:\[[^]]*\])?\{([^}]+\.pdf)\}", fig, body)
+
 
 # references from the .bbl, numbered as in the PDF
 items = re.split(r"\\bibitem(?:\[[^]]*\])?\{([^}]+)\}", bbl.split("\\end{thebibliography}")[0])[1:]

@@ -7,7 +7,7 @@ SplitNN, our recipe, ImageNet init., 3 seeds & 3 & 1.25\,MiB & -- & 5.5 & 81.1\,
 CLIP ViT-B/16 bottoms, LoRA, 3 seeds & 3 & 480\,KiB & 1054 & 42 & 84.1\,{\scriptsize$\pm$3.0} & 82.1\,{\scriptsize$\pm$4.5} & 95.9\,{\scriptsize$\pm$1.6} \\
 CLIP ViT-B/16 bottoms, frozen, 3 seeds & 3 & 240\,KiB & 351 & 13 & 82.6\,{\scriptsize$\pm$1.6} & 79.3\,{\scriptsize$\pm$2.1} & 94.7\,{\scriptsize$\pm$1.9} \\
 \midrule
-\multicolumn{8}{@{}l}{\emph{Few rounds, frozen features: each party trains an MLP to 4 logits (logits up, their gradients down)}}\\
+\multicolumn{8}{@{}l}{\emph{Logit heads, frozen features: each party trains an MLP to 4 logits (logits up, their gradients down, every mini-batch)}}\\
 CLIP ViT-L/14 & 3 & 5\,KiB & 162 & 1.5 & 84.9\,{\scriptsize$\pm$0.7} & 81.3\,{\scriptsize$\pm$1.0} & 96.1\,{\scriptsize$\pm$0.2} \\
 DINOv2 ViT-g/14 & 3 & 6\,KiB & 599 & 4.7 & 85.0\,{\scriptsize$\pm$0.5} & 83.5\,{\scriptsize$\pm$0.9} & 95.6\,{\scriptsize$\pm$0.2} \\
 CLIP ViT-B/16 & 3 & 6\,KiB & 35 & 0.5 & 84.7\,{\scriptsize$\pm$1.2} & 81.8\,{\scriptsize$\pm$2.0} & 96.0\,{\scriptsize$\pm$0.2} \\

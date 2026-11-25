@@ -1,0 +1,56 @@
+% Fig. 1: split learning, FedOnce and our protocol (FedOnce with a frozen public foundation encoder and optional local PCA)
+\begin{figure}[t]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[font=\scriptsize, >={Stealth[length=1.6mm]},
+  srv/.style={draw, rounded corners=2pt, fill=black!6, minimum width=3.55cm, minimum height=0.72cm, align=center, inner sep=2pt},
+  img/.style={draw, fill=white, minimum width=1.3cm, minimum height=0.32cm, inner sep=1pt},
+  tr/.style={draw, rounded corners=1.5pt, fill=orange!22, minimum width=1.3cm, minimum height=0.5cm, align=center, inner sep=1pt},
+  fz/.style={draw, rounded corners=1.5pt, fill=blue!12, minimum width=1.3cm, minimum height=0.5cm, align=center, inner sep=1pt},
+  pc/.style={draw, dashed, rounded corners=1.5pt, fill=green!12, minimum width=1.3cm, minimum height=0.32cm, align=center, inner sep=1pt},
+  box/.style={draw=black!45, rounded corners=3pt, inner sep=2.5pt},
+  note/.style={align=center, text width=3.7cm, font=\scriptsize\itshape}]
+% ---------------------------------------------------------------- (a) split learning
+\begin{scope}[xshift=0cm]
+\node[font=\small\bfseries, anchor=west] at (-1.95,3.7) {(a) Split learning};
+\node[srv] (sa) at (0,2.9) {label owner\\top model + labels};
+\foreach \x/\n in {-1.0/1, 1.0/$K$} {
+  \node[img] (ia\n) at (\x,0) {images};
+  \node[tr, above=1.5mm of ia\n] (ea\n) {encoder\\(trained)};
+  \node[box, fit=(ia\n)(ea\n), label={[font=\scriptsize]below:party \n}] (pa\n) {};
+  \draw[->, thick] ([xshift=-1.5mm]ea\n.north) -- node[left, font=\tiny, inner sep=1pt] {act.} ([xshift=-1.5mm]sa.south -| ea\n.north);
+  \draw[<-, thick] ([xshift=1.5mm]ea\n.north) -- node[right, font=\tiny, inner sep=1pt] {grad.} ([xshift=1.5mm]sa.south -| ea\n.north);
+}
+\node at (0,0.4) {\dots};
+\node[note] at (0,-1.2) {every mini-batch, all parties online:\\thousands of messages};
+\end{scope}
+% ---------------------------------------------------------------- (b) FedOnce
+\begin{scope}[xshift=4.15cm]
+\node[font=\small\bfseries, anchor=west] at (-1.95,3.7) {(b) FedOnce};
+\node[srv] (sb) at (0,2.9) {label owner\\trains a head, alone};
+\foreach \x/\n in {-1.0/1, 1.0/$K$} {
+  \node[img] (ib\n) at (\x,0) {images};
+  \node[tr, above=1.5mm of ib\n] (eb\n) {encoder\\(no labels)};
+  \node[box, fit=(ib\n)(eb\n), label={[font=\scriptsize]below:party \n}] (pb\n) {};
+  \draw[->, thick] (eb\n.north) -- node[right, font=\tiny, inner sep=1pt, align=left] {features,\\once} (sb.south -| eb\n.north);
+}
+\node at (0,0.4) {\dots};
+\node[note] at (0,-1.2) {one message per party;\\each party trains its own encoder};
+\end{scope}
+% ---------------------------------------------------------------- (c) ours
+\begin{scope}[xshift=8.3cm]
+\node[font=\small\bfseries, anchor=west] at (-1.95,3.7) {(c) Ours};
+\node[srv] (sc) at (0,2.9) {label owner\\trains a head, alone};
+\foreach \x/\n in {-1.0/1, 1.0/$K$} {
+  \node[img] (ic\n) at (\x,0) {images};
+  \node[fz, above=1.2mm of ic\n] (ec\n) {frozen\\encoder};
+  \node[pc, above=1.2mm of ec\n] (cc\n) {PCA};
+  \node[box, fit=(ic\n)(ec\n)(cc\n), label={[font=\scriptsize]below:party \n}] (pc\n) {};
+  \draw[->, thick] (cc\n.north) -- node[right, font=\tiny, inner sep=1pt, align=left] {features,\\once} (sc.south -| cc\n.north);
+}
+\node at (0,0.4) {\dots};
+\node[note] at (0,-1.2) {one message per party;\\no training at the parties};
+\end{scope}
+\end{tikzpicture}}
+\caption{Three ways for $K$ parties holding different images of the same entities to train a classifier with a label owner. (a)~Split learning trains each party's encoder from the label owner's gradients, so activations go up and gradients come down at every mini-batch. (b)~FedOnce~\cite{wu2022fedonce} uploads once, but each party must first train its encoder on its own unlabelled data. (c)~Our protocol keeps the single upload and replaces the party-trained encoder by a frozen public foundation encoder, optionally followed by a PCA fitted by each party alone (dashed); the label owner then trains a head for as long as it wants. Orange: encoders trained by the parties; blue: frozen public encoder; green, dashed: optional PCA.}\label{fig:schemes}
+\end{figure}

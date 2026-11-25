@@ -148,34 +148,34 @@ NAME = {"dinov2_g_224": "DINOv2-g", "dinov2_l_224": "DINOv2-L", "dinov2_b_224": 
 
 # ------------------------------------------------------------------ families: (label, marker, colour, uses foundation)
 FAM = {
-    "fm_oneshot": ("one-shot, frozen", "o", C["blue"], True),
-    "fm_pca": ("one-shot, PCA + quantised", "o", C["green"], True),
-    "fm_logits": ("4-logit head, few rounds", "D", C["purple"], True),
+    "fm_oneshot": ("one upload, frozen (ours)", "o", C["blue"], True),
+    "fm_pca": ("one upload + local PCA (ours)", "o", C["green"], True),
+    "fm_logits": ("logit heads", "D", C["purple"], True),
     "fm_split_frozen": ("split, frozen bottoms", "v", C["orange"], True),
     "fm_split_lora": ("split, LoRA", "^", C["orange"], True),
     "fm_split_ft": ("split, full fine-tuning", "p", C["red"], True),
-    "fm_he": ("HE linear head (CKKS)", "P", "#222222", True),
-    "fm_dp": ("DP upload", "X", "#8c6d31", True),
+    "fm_he": ("encrypted ridge (CKKS)", "P", "#222222", True),
+    "fm_dp": ("DP uploads", "X", "#8c6d31", True),
     "nf_split": ("split, ResNet-18", "s", C["grey"], False),
-    "nf_ssl": ("one-shot SSL (FedOnce)", "h", C["grey"], False),
-    "nf_frozen": ("one-shot, frozen ResNet-50 / random ViT", "o", C["grey"], False),
+    "nf_ssl": ("FedOnce (party-trained)", "h", C["grey"], False),
+    "nf_frozen": ("ImageNet ResNet / random ViT", "o", C["grey"], False),
 }
 MENC = ("dinov2_b", "clip_b16", "dinov2_g", "clip_l14")  # MILK10k encoders
 RN_PCA = [k for k in ("resnet18_in1k_224", "resnet50_in1k_224") if (rn.get(k) or {}).get("E7_selected")]
 MK_LOGITS = any(f"clin+derm|logits{mf.get('K')}|bal" in (mf.get(k) or {}).get("heads", {}) for k in MENC)
 if RN_PCA:  # ImageNet ResNet PCA points: shorter labels, so that the hollow-marker legend keeps one row
-    FAM["nf_frozen"] = ("frozen ResNet / random ViT", "o", C["grey"], False)
-    FAM["nf_pca"] = ("ResNet, PCA + quant.", "o", C["grey"], False)
+    FAM["nf_frozen"] = ("ImageNet ResNet / random ViT", "o", C["grey"], False)
+    FAM["nf_pca"] = ("ImageNet ResNet + PCA", "o", C["grey"], False)
 if MK_LOGITS:  # 4 logits per party on VertiBench, 7 on MILK10k
-    FAM["fm_logits"] = ("logit head, few rounds", "D", C["purple"], True)
-FAM_LONG = {"fm_oneshot": "foundation one-shot frozen", "fm_pca": "foundation one-shot + PCA-k x bits", "fm_logits": "foundation few-round 4-logit",
+    FAM["fm_logits"] = ("logit heads", "D", C["purple"], True)
+FAM_LONG = {"fm_oneshot": "foundation one-shot frozen", "fm_pca": "foundation one-shot + PCA-k x bits", "fm_logits": "foundation logit heads (4 logits per party)",
             "fm_split_frozen": "foundation split learning frozen bottoms", "fm_split_lora": "foundation split LoRA",
             "fm_split_ft": "foundation split full fine-tuning", "fm_he": "HE head (foundation features)", "fm_dp": "DP upload (foundation features)",
             "nf_split": "non-foundation split learning (scratch or ImageNet ResNet)", "nf_ssl": "non-foundation one-shot self-supervised (FedOnce)",
             "nf_frozen": "non-foundation one-shot frozen (ImageNet ResNet-50 / random ViT)",
             "nf_pca": "non-foundation one-shot + PCA-k x bits (ImageNet ResNet)"}
 if MK_LOGITS:
-    FAM_LONG["fm_logits"] = "foundation few-round per-party logits"
+    FAM_LONG["fm_logits"] = "foundation logit heads (per-party logits)"
 if RN_PCA:
     FAM_LONG["nf_frozen"] = "non-foundation one-shot frozen (ImageNet ResNet / random ViT)"
 
@@ -599,74 +599,6 @@ def rn_lines(ax, pts):
 
 XL = (min(20, 0.75 * min(p["bytes_per_sample"] for p in P if p["in_pareto_set"])), 2.6 * MiB)  # MILK10k (2 parties) goes down to 4 B
 XMINOR = [2.0 ** i for i in range(int(np.ceil(np.log2(XL[0]))), 22)]
-fig, axs = plt.subplots(1, 2, figsize=(4.8, 2.95), sharex=True)
-for ax, bench in zip(axs, (VB, MK), strict=True):
-    pts = [p for p in P if p["benchmark"] == bench and p["in_pareto_set"]]
-    lo, hi = YL[bench]
-    # validation-selected PCA / quantisation curve
-    pc = sorted([p for p in pts if p["fam"] == "fm_pca"], key=lambda p: p["bytes_per_sample"])
-    if bench == VB and pc:
-        ax.plot([p["bytes_per_sample"] for p in pc], [p["metric_mean"] for p in pc], color=C["green"], lw=0.8, zorder=2)
-    rn_lines(ax, pts)
-    # Pareto envelope (staircase), drawn under the markers
-    fr = pareto(pts)
-    xs, ys = [p["bytes_per_sample"] for p in fr], [p["metric_mean"] for p in fr]
-    ax.step(xs + [XL[1]], ys + [ys[-1]], where="post", color="k", lw=0.7, ls=(0, (3, 2)), zorder=1)
-    below = []
-    for fam, (_lab, mk, col, fm) in FAM.items():
-        q = [p for p in pts if p["fam"] == fam]
-        vis = [p for p in q if p["metric_mean"] >= lo]
-        below += [p for p in q if p["metric_mean"] < lo]
-        if not vis:
-            continue
-        x, y, e = (np.array([p[c] for p in vis]) for c in ("bytes_per_sample", "metric_mean", "metric_std"))
-        ax.errorbar(x, y, yerr=e, fmt="none", ecolor=col if fm else C["grey"], elinewidth=0.5, alpha=0.45, capsize=0, zorder=2)
-        ms = 12 if fam in ("fm_pca", "nf_pca") else (26 if mk in "PX" else 20)
-        if fm:
-            ax.scatter(x, y, s=ms, marker=mk, c=col, edgecolors="white", linewidths=0.4, zorder=3)
-        else:
-            ax.scatter(x, y, s=ms, marker=mk, facecolors="white", edgecolors=col, linewidths=0.9, zorder=3)
-    ax.scatter(xs, ys, s=58, facecolors="none", edgecolors="k", linewidths=0.6, zorder=4)
-    if below:
-        ax.text(0.98, 0.015, f"below the axis: {len(below)} points ({', '.join(sorted({FAM[p['fam']][0] for p in below}))}, "
-                f"{min(p['metric_mean'] for p in below):.0f}–{max(p['metric_mean'] for p in below):.0f} %)",
-                transform=ax.transAxes, ha="right", va="bottom", fontsize=4.8, color="#555555")
-    ax.set_xscale("log", base=2)
-    ax.set_xlim(*XL)
-    ax.set_ylim(lo, hi)
-    ax.set_xticks([32, 1 * KiB, 32 * KiB, 1 * MiB])
-    ax.set_xticklabels(["32 B", "1 KiB", "32 KiB", "1 MiB"])
-    ax.set_xticks(XMINOR, minor=True)
-    ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
-    ax.tick_params(axis="x", which="minor", length=1.5)
-    ax.tick_params(labelsize=6.5)
-    ax.grid(True, which="major", alpha=0.25)
-    ax.set_xlabel("bytes exchanged per sample (all parties)", fontsize=7)
-    ax.set_title(bench + (" (16 parties)" if bench == VB else " (2 parties)"), fontsize=7)
-axs[0].set_ylabel("test accuracy (%)", fontsize=7)
-axs[1].set_ylabel("macro F1 (%)", fontsize=7)
-
-# regimes, sparingly: each label points at the point that defines it; label positions (data coordinates) sit in empty areas
-RG = dict(fontsize=5.8, style="italic", color="#333333", va="center")
-
-
-def regime(ax, txt, p, xytext, ha="left"):
-    ax.annotate(txt, (p["bytes_per_sample"], p["metric_mean"]), xytext=xytext, textcoords="data", ha=ha,
-                arrowprops=dict(arrowstyle="-", lw=0.4, color="#666666", shrinkA=1, shrinkB=3), **RG)
-
-
-for ax, bench, pos in ((axs[0], VB, {"communication": (3.6, 84.7) if RN_PCA else (40, 75.9), "accuracy": (300 * KiB, 87.25), "mix": (1.3 * KiB, 82.6), "security": (2.4 * MiB, 79.4)}),
-                       (axs[1], MK, {"communication": (110, 45.0), "accuracy": (12 * KiB, 64.6), "mix": (90, 60.5), "security": (2.4 * MiB, 51.0)})):
-    fr = pareto([p for p in P if p["benchmark"] == bench and p["in_pareto_set"]])
-    he_ = [p for p in P if p["benchmark"] == bench and p["fam"] == "fm_he"]
-    mix = [p for p in P if p["benchmark"] == bench and p["fam"] == "fm_logits"] or [p for p in fr if p["fam"] == "fm_pca"][-1:]
-    regime(ax, "communication", fr[0], pos["communication"])
-    regime(ax, "accuracy", max(fr, key=lambda p: p["metric_mean"]), pos["accuracy"], ha="right" if bench == MK else "center")
-    if mix:
-        regime(ax, "mix", max(mix, key=lambda p: p["metric_mean"]), pos["mix"], ha="center" if bench == VB else "left")
-    if he_:
-        regime(ax, "security", max(he_, key=lambda p: p["metric_mean"]), pos["security"], ha="right")
-
 # legend: foundation (filled) / no foundation (hollow) / Pareto
 H1 = [Line2D([], [], ls="", marker=mk, ms=4.2 if mk not in "PX" else 4.8, mfc=col, mec="white", mew=0.4, label=lab) for fam, (lab, mk, col, fm) in FAM.items() if fm]
 H1[1] = Line2D([], [], ls="-", lw=0.8, marker="o", ms=3.4, color=C["green"], mfc=C["green"], mec="white", mew=0.4, label=FAM["fm_pca"][0])
@@ -679,10 +611,109 @@ H2.append(Line2D([], [], ls=(0, (3, 2)), lw=0.7, color="k", marker="o", ms=6, mf
 NC2 = len(H2) if RN_PCA else 4  # one row of hollow-marker entries
 kw = dict(frameon=False, fontsize=5.6, handletextpad=0.25, handlelength=1.3, columnspacing=0.8, borderaxespad=0.1, borderpad=0.1,
           title_fontsize=5.8, labelspacing=0.3, alignment="left")
-fig.legend(handles=H1, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 0.088), title="foundation model (filled markers)", **kw)
-fig.legend(handles=H2, ncol=NC2, loc="lower left", bbox_to_anchor=(0.0, 0.0), title="no foundation model (hollow markers)", **kw)
-fig.tight_layout(rect=(0, 0.215, 1, 1), w_pad=1.0)
-fig.savefig(os.path.join(OUT, "fig_frontier.pdf"))
+
+# Fig. 1: two stacked full-width panels; every group of points is named on the plot (no decoding through a legend).
+# MILK10k: the PCA curves of the two large encoders only (the ViT-B curves are in fig_frontier_axes_milk).
+F1_HIDE = {MK: lambda p: p["fam"] == "fm_pca" and p["encoder"] in ("DINOv2-B", "CLIP-B")}
+LBL = dict(fontsize=5.9, color="#222222", va="center")
+
+
+def f1_points(bench):
+    hide = F1_HIDE.get(bench, lambda p: False)
+    return [p for p in P if p["benchmark"] == bench and p["in_pareto_set"] and not hide(p)]
+
+
+def pick(pts, fam=None, enc=None, name=None):
+    q = [p for p in pts if (fam is None or p["fam"] == fam) and (enc is None or p["encoder"] == enc) and (name is None or name in p["name"])]
+    assert q, (fam, enc, name)
+    return q
+
+
+def label(ax, txt, p, xy, ha="left", color="#222222"):
+    """Name the group of points that p belongs to, with a thin leader line from the text at xy (data coordinates) to p."""
+    ax.annotate(txt, (p["bytes_per_sample"], p["metric_mean"]), xytext=xy, textcoords="data", ha=ha, **{**LBL, "color": color},
+                arrowprops=dict(arrowstyle="-", lw=0.35, color="#8a8a8a", shrinkA=1.5, shrinkB=2.5), zorder=5)
+
+
+fig, axs = plt.subplots(2, 1, figsize=(4.8, 5.4), sharex=True)
+for ax, bench in zip(axs, (VB, MK), strict=True):
+    pts = f1_points(bench)
+    lo, hi = YL[bench]
+    # curves: one line per encoder for the validation-selected PCA x bits points (same encoder, growing byte budget)
+    for enc, ls in (("DINOv2-g", "-"), ("CLIP-L", (0, (2.5, 1.5)))):
+        pc = sorted([p for p in pts if p["fam"] == "fm_pca" and p["encoder"] == enc], key=lambda p: p["bytes_per_sample"])
+        if pc:
+            ax.plot([p["bytes_per_sample"] for p in pc], [p["metric_mean"] for p in pc], color=C["green"], lw=0.8, ls=ls, zorder=2)
+    rn_lines(ax, pts)
+    fr = pareto(pts)
+    assert {id(p) for p in fr} == {id(p) for p in P if p["benchmark"] == bench and p["pareto"]}, "Fig. 1 envelope differs from the full one"
+    xs, ys = [p["bytes_per_sample"] for p in fr], [p["metric_mean"] for p in fr]
+    ax.step(xs + [XL[1]], ys + [ys[-1]], where="post", color="k", lw=0.7, ls=(0, (3, 2)), zorder=1)
+    below = []
+    for fam, (_lab, mk, col, fm) in FAM.items():
+        q = [p for p in pts if p["fam"] == fam]
+        vis = [p for p in q if p["metric_mean"] >= lo]
+        below += [p for p in q if p["metric_mean"] < lo]
+        if not vis:
+            continue
+        x, y, e = (np.array([p[c] for p in vis]) for c in ("bytes_per_sample", "metric_mean", "metric_std"))
+        ax.errorbar(x, y, yerr=e, fmt="none", ecolor=col if fm else C["grey"], elinewidth=0.5, alpha=0.4, capsize=0, zorder=2)
+        ms = 13 if fam in ("fm_pca", "nf_pca") else (30 if mk in "PX" else 24)
+        if fm:
+            ax.scatter(x, y, s=ms, marker=mk, c=col, edgecolors="white", linewidths=0.4, zorder=3)
+        else:
+            ax.scatter(x, y, s=ms, marker=mk, facecolors="white", edgecolors="#555555", linewidths=0.9, zorder=3)
+    ax.scatter(xs, ys, s=62, facecolors="none", edgecolors="k", linewidths=0.6, zorder=4)
+    if below:
+        ax.text(0.99, 0.02, f"not shown: {len(below)} DP uploads, {min(p['metric_mean'] for p in below):.0f}–{max(p['metric_mean'] for p in below):.0f} %",
+                transform=ax.transAxes, ha="right", va="bottom", fontsize=5.2, color="#555555")
+    ax.set_xscale("log", base=2)
+    ax.set_xlim(*XL)
+    ax.set_ylim(lo, hi + (0.9 if bench == VB else 0))
+    ax.set_xticks([4, 32, 256, 2 * KiB, 16 * KiB, 128 * KiB, 1 * MiB])
+    ax.set_xticklabels(["4 B", "32 B", "256 B", "2 KiB", "16 KiB", "128 KiB", "1 MiB"])
+    ax.set_xticks(XMINOR, minor=True)
+    ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+    ax.tick_params(axis="x", which="minor", length=1.5)
+    ax.tick_params(labelsize=6.5)
+    ax.xaxis.set_tick_params(labelbottom=True)
+    ax.grid(True, which="major", alpha=0.25)
+    ax.set_title(("(a) " if bench == VB else "(b) ") + bench + (" (16 parties)" if bench == VB else " (2 parties)"), fontsize=7.5, loc="left")
+axs[0].set_ylabel("test accuracy (%)", fontsize=7)
+axs[1].set_ylabel("macro F1 (%)", fontsize=7)
+axs[1].set_xlabel("bytes exchanged per training sample, all parties, both directions (log scale)", fontsize=7)
+
+# direct labels; positions in data coordinates, chosen in empty areas of each panel
+G, GR = C["green"], "#555555"
+ax, q = axs[0], f1_points(VB)
+label(ax, "ours: DINOv2-g, one upload + local PCA\n(one dot per byte budget)", pick(q, "fm_pca", "DINOv2-g", "PCA-32, 4-bit")[0], (5, 86.3), color=G)
+label(ax, "ours: CLIP-L alone, or with CLIP-B,\none upload, no compression", pick(q, "fm_oneshot", name="CLIP-L + CLIP-B")[0], (220 * KiB, 87.9), ha="center", color=C["blue"])
+label(ax, "logit heads, ~300 messages\n(CLIP-L, DINOv2-g, CLIP-B)", pick(q, "fm_logits", "DINOv2-g")[0], (2.2 * KiB, 87.9), ha="center", color=C["purple"])
+label(ax, "split learning, CLIP-B\n(LoRA / frozen bottoms)", pick(q, "fm_split_lora")[0], (1.5 * MiB, 85.6), ha="center", color=C["orange"])
+label(ax, "encrypted ridge (CKKS)", pick(q, "fm_he", "CLIP-L", "PCA-16")[0], (110 * KiB, 75.9), ha="center")
+label(ax, "split, ResNet-18\n(SplitNN, our recipe)", pick(q, "nf_split", name="VertiBench recipe")[0], (2.5 * MiB, 79.4), ha="right", color=GR)
+label(ax, "ImageNet ResNet-18 / -50, one upload + PCA", pick(q, "nf_pca", name="ResNet-50", )[0], (5, 74.2), color=GR)
+label(ax, "FedOnce", pick(q, "nf_ssl", name="Noise")[0], (5 * KiB, 79.4), ha="center", color=GR)
+label(ax, "DP uploads", pick(q, "fm_dp", name="PCA-64, DP eps=64")[0], (900, 75.9), ha="center", color="#8c6d31")
+ax, q = axs[1], f1_points(MK)
+label(ax, "ours: CLIP-L, one upload + PCA (dashed)", pick(q, "fm_pca", "CLIP-L", "up to 8 B")[0], (9, 43.6), color=G)
+label(ax, "ours: DINOv2-g, one upload\n+ PCA (solid)", pick(q, "fm_pca", "DINOv2-g", "up to 256 B")[0], (40, 60.2), ha="center", color=G)
+label(ax, "ours: one upload, late fusion\n(DINOv2-g / DINOv2-B)", pick(q, "fm_oneshot", name="DINOv2-g, frozen, 8 views")[0], (1.3 * KiB, 64.0), ha="center", color=C["blue"])
+label(ax, "logit heads (4 encoders)", pick(q, "fm_logits", "CLIP-B")[0], (300, 50.6), ha="center", color=C["purple"])
+label(ax, "split learning, ViT-B bottoms\n(LoRA / fine-tuned / frozen)", pick(q, "fm_split_lora", name="DINOv2-B")[0], (1.1 * MiB, 60.4), ha="center", color=C["orange"])
+label(ax, "encrypted ridge (CKKS)", pick(q, "fm_he", "DINOv2-g", "PCA-16")[0], (13 * KiB, 42.6), ha="left")
+label(ax, "split, ResNet-18\n(ImageNet / scratch)", pick(q, "nf_split", name="ImageNet")[0], (1.0 * MiB, 46.0), ha="center", color=GR)
+
+# what the line styles and markers mean (the rest is named on the plot)
+LG = [Line2D([], [], ls="", marker="o", ms=4.4, mfc=C["blue"], mec="white", mew=0.4, label="filled: public foundation encoder"),
+      Line2D([], [], ls="", marker="o", ms=4.4, mfc="white", mec="#555555", mew=0.9, label="hollow: no foundation encoder"),
+      Line2D([], [], ls="", marker="o", ms=7, mfc="none", mec="k", mew=0.6, label="circled: on the envelope"),
+      Line2D([], [], ls=(0, (3, 2)), lw=0.7, color="k", label="envelope (best score at each budget)"),
+      Line2D([], [], ls="", marker="|", ms=6, mew=0.6, color="#7a7a7a", label="bar: ±1 std over seeds / folds")]
+fig.legend(handles=LG, ncol=3, loc="lower left", bbox_to_anchor=(0.0, 0.0), frameon=False, fontsize=5.8, handletextpad=0.3, handlelength=1.4,
+           columnspacing=1.0, borderaxespad=0.1)
+fig.tight_layout(rect=(0, 0.055, 1, 1), h_pad=0.8)
+fig.savefig(os.path.join(OUT, "fig_frontier.pdf"), metadata={"CreationDate": None})
 fig.savefig(os.path.join(OUT, "fig_frontier.png"), dpi=220)
 plt.close(fig)
 print("wrote fig_frontier.pdf, fig_frontier.png")
@@ -850,6 +881,46 @@ def axes_figure(bench, yl, yl_exp, one_y, fname):
 
 axes_figure(VB, YL[VB], (50.0, 88.5), 80.75, "fig_frontier_axes")
 axes_figure(MK, YL[MK], (38.0, 65.5), 59.0, "fig_frontier_axes_milk")
+
+# ------------------------------------------------------------------ tab_summary.tex: one row per approach, both benchmarks (main text)
+def pt(bench, name):
+    q = [p for p in P if p["benchmark"] == bench and p["name"] == name]
+    assert len(q) == 1, (bench, name, len(q))
+    return q[0]
+
+
+def cell(bench, name):
+    if name is None:
+        return "-- & --"
+    p = pt(bench, name)
+    return f"{p['metric_mean']:.1f} & {size(p['bytes_per_sample'])}"
+
+
+SUMMARY = [  # (approach, party encoder, exchanges, VertiBench point, MILK10k point); None: not run
+    ("\\multicolumn{7}{@{}l}{\\emph{No foundation model}}", None, None, None, None),
+    ("Split learning (SplitNN)", "ResNet-18, scratch", "every batch", "SplitNN, VertiBench recipe (ResNet-18, 13 bands)", "ResNet-18, scratch (split)"),
+    ("Split learning", "ResNet-18, ImageNet", "every batch", "SplitNN, our recipe, ImageNet init. (RGB)", "ResNet-18, ImageNet (split)"),
+    ("FedOnce", "trained by each party", "once", "FedOnce, SimCLR (13 bands)", None),
+    ("\\multicolumn{7}{@{}l}{\\emph{Public foundation encoder}}", None, None, None, None),
+    ("Split learning, LoRA", "ViT-B, adapted", "every batch", "CLIP-B bottoms, LoRA (split)", "DINOv2-B, LoRA (split)"),
+    ("Logit heads", "DINOv2-g, frozen", "every batch", "DINOv2-g, 4-logit MLP per party", "DINOv2-g, 7-logit MLP per party"),
+    ("One upload (ours)", "CLIP-L / DINOv2-g$^a$", "once", "CLIP-L, frozen, one upload", "DINOv2-g, frozen, 8 views averaged, late fusion"),
+    ("\\quad + local PCA, small", "DINOv2-g", "once", "DINOv2-g, PCA-16, 2-bit", "DINOv2-g, PCA x bits up to 64 B (per-fold val. selection)"),
+    ("\\quad + local PCA, knee", "DINOv2-g", "once", "DINOv2-g, PCA-256, 4-bit", "DINOv2-g, PCA x bits up to 768 B (per-fold val. selection)"),
+    ("\\quad + encrypted ridge", "CLIP-L / DINOv2-g", "once$^b$", "CLIP-L, PCA-256, ridge trained under CKKS", "DINOv2-g, full, class-weighted ridge under CKKS"),
+    ("\\quad + DP noise, $\\varepsilon=8$", "DINOv2-g, PCA-16", "once", "DINOv2-g, PCA-16, DP eps=8 per upload", None),
+]
+rows = []
+for appr, enc, ex, vb, mk in SUMMARY:
+    if enc is None:
+        rows.append(appr + "\\\\")
+        continue
+    rows.append(f"{appr} & {enc} & {ex} & {cell(VB, vb)} & {cell(MK, mk)}\\\\")
+    if appr == "FedOnce":
+        rows.append("\\midrule")
+with open(os.path.join(OUT, "tab_summary.tex"), "w") as f:
+    f.write("\n".join(rows) + "\n")
+print("wrote tab_summary.tex")
 
 # ------------------------------------------------------------------ macros
 MAC = {}
