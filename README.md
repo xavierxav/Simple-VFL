@@ -17,7 +17,8 @@ It worked better than expected: **+1.30 points over the published baseline** on
 VertiBench's official test set. [Full tables and protocol details](RESULTS.md)
 
 This repository was rebuilt in 2026 from the code and results of that 2024 CEA
-internship; the experiment tables are from that work.
+internship, with clean multi-seed evaluation, capacity-matched controls, and
+IPCC land-cover ablations.
 
 ## What this repo shows
 
@@ -142,9 +143,9 @@ encoders, so it is iterative too. A capacity-matched one-view control, with a
 24.6M-parameter head instead of 1.5M, stays at 80.54% on `sources` and 72.60% on
 IPCC: widening the head does not reproduce the gain of the 16 views.
 
-The four-logit variant is cheap in epochs as well: after 10 epochs it reaches
-**77.96%** on IPCC, above SplitNN's 76.50%. On validation, epoch 10 (77.94%)
-already edges past SplitNN's best (77.84%, around epoch 20). SplitNN starts at
+The logit-only variant is cheap in epochs as well: after 10 epochs it reaches
+**77.96%** on IPCC, above the feature-level SplitNN's 76.50%. On validation, epoch 10 (77.94%)
+already edges past feature-level SplitNN's best (77.84%, around epoch 20). SplitNN starts at
 46.9% and ends lower.
 
 ## Quickstart

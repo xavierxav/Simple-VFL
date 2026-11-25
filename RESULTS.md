@@ -23,7 +23,7 @@ separately. A **frozen DINOv2 ViT-g/14 backbone**, run locally at each party,
 gives a compact 1536-d embedding that is competitive with end-to-end SplitNN
 training. On VertiBench's satellite task and official held-out test set, our
 fresh five-seed one-shot run reaches **82.47 ± 0.70% accuracy / 95.08 ± 0.17
-AUC**—**+1.30 accuracy points / +1.18 AUC** over the published **81.17 ± 0.35%**
+AUC**—**+1.30 accuracy points** over the published **81.17 ± 0.35%**
 SplitNN baseline. Our pipeline extracts features from three RGB bands, while
 SplitNN uses all 13.
 In the concatenation models the coordinator trains
@@ -173,16 +173,16 @@ therefore attributable to the views, not to head capacity.
 
 ### Epoch budget and feature-level SplitNN
 
-The four-logit model is quick. On IPCC, after 10 epochs it reaches **77.96% test
+The logit-only model is quick. On IPCC, after 10 epochs it reaches **77.96% test
 accuracy**, above SplitNN's 76.50%. On validation, epoch 10 (77.94%) already
 edges past SplitNN's best (77.84%, around epoch 20):
 
 | Validation accuracy | Epoch 1 | Epoch 10 | Best |
 |---|---:|---:|---:|
-| Four logits | 72.64% | 77.94% | 80.69% (ep 22) |
+| Logit-only late fusion | 72.64% | 77.94% | 80.69% (ep 22) |
 | Feature-level SplitNN | 46.86% | 74.88% | 77.84% (ep 21) |
 
-SplitNN starts much lower and ends lower. With four logits per party per round,
+SplitNN starts much lower and ends lower. With only class logits per party per round,
 10 epochs are enough to pass its peak.
 
 A feature-level SplitNN with the same inputs and capacity—one trainable
@@ -213,9 +213,9 @@ party holding 16 revisits. On the semantic IPCC label, the one-shot 16-view
 Sentinel model reaches **77.93 ± 0.52 accuracy / 94.13 ± 0.53 AUC** (five
 seeds), vs **70.66 / 86.49** for the location-only random forest. The separate
 SPOT + Sentinel late-fusion comparison reaches **78.00 ± 0.55 / 95.04 ± 0.14**.
-Adding SPOT to Sentinel gives **+1.80 accuracy / +0.83 AUC** over SPOT alone
+Adding Sentinel to SPOT gives **+1.80 accuracy / +0.83 AUC** over SPOT alone
 on IPCC (+0.65 / +0.12 on `sources`),
-and using all 16 revisits gives **~+4.3** over one revisit on IPCC (+4.9 on
+and using all 16 revisits gives **+4.2** over one revisit on IPCC (+4.9 on
 `sources`). That is a real signal, but a modest one: the dataset is
 **label-limited**, the revisits are correlated but still add signal, and `sources` is a geographic
 shortcut. We use WorldStrat for an exploratory two-sensor benchmark; it is not a
