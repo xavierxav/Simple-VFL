@@ -277,7 +277,8 @@ note = (f'<div class="note"><b>Modifications depuis {html.escape(LABEL)}</b> : {
         f'{counts["new"]} ajoutés, {counts["del"]} supprimés, {counts["moved"]} déplacés. '
         '<ins>Ajouts en vert</ins>, <del>suppressions en rouge</del> ; les blocs inchangés sont repliés. '
         'Les liens mènent à la <a href="index.html">version complète</a>.</div>')
-page = (f"<title>Diff: {html.escape(LABEL)}</title>{head}<style>{style}</style><main>"
-        f'<header class="paper"><h1>{html.escape(title)}</h1></header>{note}' + "".join(parts) + "</main>")
+page = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>Diff: {html.escape(LABEL)}</title>{head}<style>{style}</style></head><body><main>"
+        f'<header class="paper"><h1>{html.escape(title)}</h1></header>{note}' + "".join(parts) + "</main></body></html>")
 open(OUT, "w", encoding="utf-8").write(page)
 print(OUT, counts, len(page), "bytes")
