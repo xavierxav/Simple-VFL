@@ -107,25 +107,25 @@ The three-seed SplitNN re-run that retains test probabilities averages \auSnAll\
 The retrieval attacker of App.~\ref{app:privacy} does not owe its success to siblings: across test uploads, the label of the nearest public training image in CLIP-L space matches in \nnPubAll\,\% of the cases (\nnPubSib\,\% with known siblings, \nnPubNoSib\,\% without), and the neighbour is itself a sibling in just \nnPubIsSib\,\% of the sibling cases, about 5\,\% overall.
 
 \begin{table}[tbp]
-\caption{VertiBench audit. Test accuracy (\%) on all 785 test samples, on the \auSibN{} with a training tile from the same site and on the \auNoSibN{} without; paired gain over SplitNN in points with 95\,\% paired bootstrap interval and exact McNemar test, on all samples and without siblings. Probabilities averaged over 3 seeds per method.}\label{tab:audit}
+\caption{VertiBench audit. Test accuracy (\%) on all 785 test samples, on the \auSibN{} with a training tile from the same site and on the \auNoSibN{} without; paired gain over SplitNN in points with 95\,\% paired bootstrap interval and exact McNemar test, on all samples and without siblings. Accuracies are means over 3 seeds; gains compare the predictions averaged over the same 3 seeds (one ensemble per method), so they differ from the difference of the accuracy columns.}\label{tab:audit}
 \centering\scriptsize
 \setlength{\tabcolsep}{3pt}
 \begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{@{}lccccccc@{}}
 \toprule
-& \multicolumn{3}{c}{Accuracy (\%)} & \multicolumn{2}{c}{Gain over SplitNN, all} & \multicolumn{2}{c@{}}{Gain, no sibling}\\
+& \multicolumn{3}{c}{Accuracy (\%), mean over seeds} & \multicolumn{2}{c}{Ensemble gain over SplitNN, all} & \multicolumn{2}{c@{}}{Ensemble gain, no sibling}\\
 \cmidrule(lr){2-4}\cmidrule(lr){5-6}\cmidrule(l){7-8}
 Head & all & sibling & no sibling & points [95\,\% CI] & McNemar & points [95\,\% CI] & McNemar\\
 \midrule
 SplitNN, VertiBench recipe & \auSnAll & \auSnSib & \auSnNoSib & -- & -- & -- & --\\
 \midrule
-One-shot MLP, CLIP-L & \auClipAll & \auClipSib & \auClipNoSib & $\pairSnClipDiff$ $[\pairSnClipLo,\pairSnClipHi]$ & $p\pairSnClipP$ & $\pairSnClipNoSibDiff$ $[\pairSnClipNoSibLo,\pairSnClipNoSibHi]$ & $p\pairSnClipNoSibP$\\
-One-shot MLP, CLIP-B & \auClipBAll & \auClipBSib & \auClipBNoSib & $\pairSnClipBDiff$ $[\pairSnClipBLo,\pairSnClipBHi]$ & $p\pairSnClipBP$ & $\pairSnClipBNoSibDiff$ $[\pairSnClipBNoSibLo,\pairSnClipBNoSibHi]$ & $p\pairSnClipBNoSibP$\\
-One-shot MLP, DINOv2-g & \auGAll & \auGSib & \auGNoSib & $\pairSnGDiff$ $[\pairSnGLo,\pairSnGHi]$ & $p\pairSnGP$ & $\pairSnGNoSibDiff$ $[\pairSnGNoSibLo,\pairSnGNoSibHi]$ & $p\pairSnGNoSibP$\\
+One-upload MLP, CLIP-L & \auClipAll & \auClipSib & \auClipNoSib & $\pairSnClipDiff$ $[\pairSnClipLo,\pairSnClipHi]$ & $p\pairSnClipP$ & $\pairSnClipNoSibDiff$ $[\pairSnClipNoSibLo,\pairSnClipNoSibHi]$ & $p\pairSnClipNoSibP$\\
+One-upload MLP, CLIP-B & \auClipBAll & \auClipBSib & \auClipBNoSib & $\pairSnClipBDiff$ $[\pairSnClipBLo,\pairSnClipBHi]$ & $p\pairSnClipBP$ & $\pairSnClipBNoSibDiff$ $[\pairSnClipBNoSibLo,\pairSnClipBNoSibHi]$ & $p\pairSnClipBNoSibP$\\
+One-upload MLP, DINOv2-g & \auGAll & \auGSib & \auGNoSib & $\pairSnGDiff$ $[\pairSnGLo,\pairSnGHi]$ & $p\pairSnGP$ & $\pairSnGNoSibDiff$ $[\pairSnGNoSibLo,\pairSnGNoSibHi]$ & $p\pairSnGNoSibP$\\
 \midrule
-Four-logit head, CLIP-L & \auLgClipAll & \auLgClipSib & \auLgClipNoSib & $\pairSnLgClipDiff$ $[\pairSnLgClipLo,\pairSnLgClipHi]$ & $p\pairSnLgClipP$ & $\pairSnLgClipNoSibDiff$ $[\pairSnLgClipNoSibLo,\pairSnLgClipNoSibHi]$ & $p\pairSnLgClipNoSibP$\\
-Four-logit head, CLIP-B & \auLgClipBAll & \auLgClipBSib & \auLgClipBNoSib & $\pairSnLgClipBDiff$ $[\pairSnLgClipBLo,\pairSnLgClipBHi]$ & $p\pairSnLgClipBP$ & $\pairSnLgClipBNoSibDiff$ $[\pairSnLgClipBNoSibLo,\pairSnLgClipBNoSibHi]$ & $p\pairSnLgClipBNoSibP$\\
-Four-logit head, DINOv2-g & \auLgGAll & \auLgGSib & \auLgGNoSib & $\pairSnLgGDiff$ $[\pairSnLgGLo,\pairSnLgGHi]$ & $p\pairSnLgGP$ & $\pairSnLgGNoSibDiff$ $[\pairSnLgGNoSibLo,\pairSnLgGNoSibHi]$ & $p\pairSnLgGNoSibP$\\
+Logit head, CLIP-L & \auLgClipAll & \auLgClipSib & \auLgClipNoSib & $\pairSnLgClipDiff$ $[\pairSnLgClipLo,\pairSnLgClipHi]$ & $p\pairSnLgClipP$ & $\pairSnLgClipNoSibDiff$ $[\pairSnLgClipNoSibLo,\pairSnLgClipNoSibHi]$ & $p\pairSnLgClipNoSibP$\\
+Logit head, CLIP-B & \auLgClipBAll & \auLgClipBSib & \auLgClipBNoSib & $\pairSnLgClipBDiff$ $[\pairSnLgClipBLo,\pairSnLgClipBHi]$ & $p\pairSnLgClipBP$ & $\pairSnLgClipBNoSibDiff$ $[\pairSnLgClipBNoSibLo,\pairSnLgClipBNoSibHi]$ & $p\pairSnLgClipBNoSibP$\\
+Logit head, DINOv2-g & \auLgGAll & \auLgGSib & \auLgGNoSib & $\pairSnLgGDiff$ $[\pairSnLgGLo,\pairSnLgGHi]$ & $p\pairSnLgGP$ & $\pairSnLgGNoSibDiff$ $[\pairSnLgGNoSibLo,\pairSnLgGNoSibHi]$ & $p\pairSnLgGNoSibP$\\
 \midrule
 Split learning, CLIP-B frozen & \auSplitFrozenAll & \auSplitFrozenSib & \auSplitFrozenNoSib & $\pairSnSplitFrozenDiff$ $[\pairSnSplitFrozenLo,\pairSnSplitFrozenHi]$ & $p\pairSnSplitFrozenP$ & $\pairSnSplitFrozenNoSibDiff$ $[\pairSnSplitFrozenNoSibLo,\pairSnSplitFrozenNoSibHi]$ & $p\pairSnSplitFrozenNoSibP$\\
 Split learning, CLIP-B LoRA & \auLoraAll & \auLoraSib & \auLoraNoSib & $\pairSnLoraDiff$ $[\pairSnLoraLo,\pairSnLoraHi]$ & $p\pairSnLoraP$ & $\pairSnLoraNoSibDiff$ $[\pairSnLoraNoSibLo,\pairSnLoraNoSibHi]$ & $p\pairSnLoraNoSibP$\\
