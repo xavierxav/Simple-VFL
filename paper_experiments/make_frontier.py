@@ -887,14 +887,14 @@ def axes_figure_both(rows, fname):
     """Main-text figure: the three non-byte axes (messages, party compute, exposure; bytes are in fig_frontier), one row per benchmark.
     rows: (bench, y-range, y-range of the exposure panel, height of the "one upload" pointer)."""
     H = 4.7
-    fig, axs = plt.subplots(len(rows), 3, figsize=(4.8, H), gridspec_kw=dict(width_ratios=(1, 1, 1.55)))
+    fig, axs = plt.subplots(len(rows), 3, figsize=(4.8, H), squeeze=False, gridspec_kw=dict(width_ratios=(1, 1, 1.55)))
     foot = []
     for r, (bench, yl, yl_exp, one_y) in enumerate(rows):
         pts = [p for p in P if p["benchmark"] == bench and p["in_pareto_set"]]
         for c, axis in enumerate(("rounds", "gflops", "exposure")):
             ax = axs[r, c]
             below, nox = frontier_panel(ax, bench, axis, yl_exp if axis == "exposure" else yl)
-            letter = "abcdef"[3 * r + c]
+            letter = "abcdefghijkl"[3 * r + c]
             ax.set_title(f"({letter}) " + ("messages", "party compute", "what the server sees")[c], fontsize=6.5, loc="left")
             ax.set_xlabel(("sequential messages", "party GFLOPs per image",
                            "most exposed  →  least exposed")[c] if r == len(rows) - 1 else "", fontsize=5.8)

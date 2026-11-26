@@ -47,20 +47,20 @@ def text(b):
 def img_hashes(d, b):
     hs = []
     for im in b.find_all("img"):
-        p = os.path.join(d, im.get("src", ""))
-        hs.append(hashlib.md5(open(p, "rb").read()).hexdigest() if os.path.exists(p) else im.get("src"))
+        p = os.path.join(d, im.get("src") or "")
+        hs.append(hashlib.md5(open(p, "rb").read()).hexdigest() if im.get("src") and os.path.isfile(p) else str(im.get("src")))
     return hs
-
-
-def key(d, b):
-    return b.name + "|" + text(b) + "|" + ",".join(img_hashes(d, b))
 
 
 TOK = re.compile(r"<math\b.*?</math>|<[^>]+>|&[#\w]+;|\s+|\w+(?:[-.,'\u2019]\w+)*|[^\s\w<&]", re.S)
 
 
 def inner(b):
-    return "".join(str(c) for c in b.contents)
+    return b.decode_contents()  # re-escapes text nodes (&amp;, &lt;)
+
+
+def key(d, b):
+    return b.name + "|" + re.sub(r"\s+", " ", inner(b)) + "|" + ",".join(img_hashes(d, b))
 
 
 def is_tag(t):
@@ -212,12 +212,12 @@ def emit_deleted(j):
             flush()
             parts.append(f'<div class="blk gone"><p class="tag">Déplacé plus loin : « {html.escape(otx[i][:90])}… »</p></div>')
             continue
-        if not otx[i]:
+        if not otx[i] and not b.find("img"):
             continue
         counts["del"] += 1
         flush()
         what = "Figure supprimée" if b.name == "figure" else "Tableau supprimé" if "tbl" in (b.get("class") or []) else "Supprimé"
-        body = html.escape(otx[i])
+        body = html.escape(otx[i]) or "(image)"
         parts.append(f'<div class="blk del"><p class="tag">{what}</p><p><del>{body}</del></p></div>')
 
 
@@ -226,6 +226,7 @@ for j, b in enumerate(nb):
     i, k = pair.get(j, (None, "new"))
     if k == "same":
         if b.name == "h1":
+            emit_deleted(j)
             continue
         if b.name in HEAD:
             flush()
