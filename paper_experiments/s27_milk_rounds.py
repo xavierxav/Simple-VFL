@@ -9,13 +9,17 @@ cycle schedule, peak lr 5e-4 for the LoRA weights and 1e-3 for the top, batch 64
            the training loss (running mean since the last log), the validation loss and metrics, the test metrics and
            test probabilities, cumulative sequential messages and bytes, wall time.  Final = checkpoint with the lowest
            validation loss (as stage 11).
-  rounds   few rendezvous (stale-gradient block updates, in the spirit of FedBCD): round 0 is the one upload (embeddings of
-           every lesion with the frozen encoder).  Round r = 1..R: the label owner trains the top for E epochs on the
-           uploaded training embeddings (fixed, warm-started across rounds), sends each party the gradient of the class-
-           weighted loss with respect to its uploaded training embeddings (one message down), each party takes E epochs
-           of LoRA steps on its own images with that fixed gradient (minibatch loss mean_i <g_i, f(aug(x_i))>, the
-           first-order surrogate of the label owner's loss), then uploads the new embeddings of every lesion (one message
-           up).  Messages after r rounds: 1 + 2r; bytes count the training and validation embeddings and the gradients
+  rounds   few rendezvous: round 0 is the one upload (embeddings of every lesion with the frozen encoder).  Round r = 1..R:
+           the label owner trains the top for E epochs on the uploaded training embeddings (fixed, warm-started across
+           rounds) and sends each party one vector per training lesion (one message down); each party takes E epochs of
+           LoRA steps on its own images, then uploads the new embeddings of every lesion (one message up).
+             --local target (default): the vector is a target embedding t_i = h_i - eta g_i (g_i: gradient of the class-
+               weighted loss w.r.t. the uploaded embedding; eta: smallest step of a log grid at which the top's weighted
+               training loss falls to --shrink (0.5) times its value); the party regresses f(aug(x_i)) on t_i (MSE), a
+               bounded objective, so lesions already fitted barely move (target propagation / proximal block update).
+             --local linear: the vector is g_i and the party minimises mean_i <g_i, f(aug(x_i))> (stale-gradient block
+               updates as in FedBCD); unbounded with E epochs of Adam steps: on fold 0 the embeddings drifted (warm-top
+               validation loss 12.8 then 43.9 after rounds 1-2) and the fresh head did not improve, so it was stopped.  Messages after r rounds: 1 + 2r; bytes count the training and validation embeddings and the gradients
            (the test embeddings, inference, are counted apart).  After every upload the label owner scores (i) the warm top and (ii) a
            fresh one-upload head (pe_common.train_head, mlp2, class weights, z-scored features, as stage 11) on validation
            and test; a protocol that stops after r rounds keeps the round with the lowest validation loss among 0..r.
@@ -24,8 +28,8 @@ cycle schedule, peak lr 5e-4 for the LoRA weights and 1e-3 for the top, batch 64
   The per-round logs therefore give the whole accuracy-versus-rendezvous curve of one run.
 
   python s27_milk_rounds.py split  [--folds 0,1,2,3,4]
-  python s27_milk_rounds.py rounds [--folds ...] [--R 10] [--E 1]
-Output ($PE_OUT): milk_rounds_split.json, milk_rounds_R{R}E{E}.json (per fold: log list + final), *_probs.npz
+  python s27_milk_rounds.py rounds [--folds ...] [--R 10] [--E 1] [--local target|linear] [--shrink 0.5]
+Output ($PE_OUT): milk_rounds_split.json, milk_rounds_target_R{R}E{E}.json (linear: milk_rounds_R{R}E{E}.json), *_probs.npz
 (test probabilities of every logged point).  JSON written after every logged point; finished folds are skipped.
 """
 
@@ -193,9 +197,9 @@ def run_split(fold_ids):
 
 
 # ------------------------------------------------------------------ few rendezvous
-def run_rounds(fold_ids, R, E):
+def run_rounds(fold_ids, R, E, local="target", shrink=0.5):
     y, Fo, parties = load()
-    name = f"milk_rounds_R{R}E{E}"
+    name = f"milk_rounds_R{R}E{E}" if local == "linear" else f"milk_rounds_{local}_R{R}E{E}"
     res, probs, npz = resume(name)
     yt = torch.as_tensor(y, device=DEV)
     assert R >= 1 and E >= 1, "round 0 (the one upload) is part of every run"
@@ -274,10 +278,25 @@ def run_rounds(fold_ids, R, E):
             Hg = Htr.clone().requires_grad_(True)
             per = F.cross_entropy(top(Hg), ytr, reduction="none") * w[ytr]
             (per.sum() / w[ytr].mean()).backward()  # per-sample gradients of w_i * CE_i (normalised by the mean weight)
-            G = Hg.grad.detach().half().float()  # fp16 on the wire
+            G = Hg.grad.detach()
+            eta, ls = 0.0, {}
+            if local == "target":
+                # targets t_i = h_i - eta g_i, eta: the smallest step of a log grid at which the (fixed) top's weighted training
+                # loss falls to `shrink` times its current value (argmin of the grid if never); fitted lesions barely move
+                with torch.no_grad():
+                    def wl(e):
+                        return float((F.cross_entropy(top(Htr - e * G), ytr, reduction="none") * w[ytr]).sum() / w[ytr].sum())
+                    l0 = wl(0.0)
+                    ls = {f"{e:.3g}": wl(e) for e in np.logspace(-1, 5, 61)}
+                    ok = [float(e) for e, v in ls.items() if v <= shrink * l0]
+                    eta = min(ok) if ok else float(min(ls, key=ls.get))
+                    l_eta = wl(eta)
+                G = (Htr - eta * G).half().float()  # the targets, fp16 on the wire
+            else:
+                G = G.half().float()  # the gradients, fp16 on the wire
             msgs += 1
             nbytes += len(tr) * sum(dims) * EMB_BYTES
-            # parties: E epochs of local LoRA steps on the fixed gradients (first-order surrogate of the loss)
+            # parties: E epochs of local LoRA steps, regressing on the targets (MSE) or on the fixed gradients (linear surrogate)
             off, pl = 0, []
             pos = {int(j): n for n, j in enumerate(tr)}
             for k, (b, P) in enumerate(zip(bottoms, parties)):
@@ -295,14 +314,16 @@ def run_rounds(fold_ids, R, E):
                         gi = Gk[torch.as_tensor([pos[int(j)] for j in idx], device=DEV)]
                         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=DEV.type == "cuda"):
                             z = b(x).float()
-                        loss = (z * gi).sum(1).mean()
+                        loss = F.mse_loss(z, gi) if local == "target" else (z * gi).sum(1).mean()
                         opt_p[k].zero_grad(set_to_none=True)
                         loss.backward()
                         opt_p[k].step()
                         sch_p[k].step()
                         lsum += loss.item()
                 pl.append(lsum)
-            H = upload(r, {"top_train_loss": tl / (E * len(tr)), "party_surrogate_sum": pl, "grad_rms": float(G.pow(2).mean().sqrt())})
+            H = upload(r, {"top_train_loss": tl / (E * len(tr)), "party_local_loss_sum": pl, "local": local, "eta": eta,
+                           "train_wloss_before": l0 if ls else None, "train_wloss_at_targets": l_eta if ls else None,
+                           "message_down_rms": float(G.pow(2).mean().sqrt())})
         # protocols that stop after r rounds: best round <= r on the validation loss of the fresh head
         sel = []
         for r in range(R + 1):
@@ -324,9 +345,11 @@ def main():
     ap.add_argument("--folds", default="0,1,2,3,4")
     ap.add_argument("--R", type=int, default=10)
     ap.add_argument("--E", type=int, default=1)
+    ap.add_argument("--local", default="target", choices=["target", "linear"])
+    ap.add_argument("--shrink", type=float, default=0.5)
     a = ap.parse_args()
     fo = [int(x) for x in a.folds.split(",")]
-    run_split(fo) if a.mode == "split" else run_rounds(fo, a.R, a.E)
+    run_split(fo) if a.mode == "split" else run_rounds(fo, a.R, a.E, a.local, a.shrink)
 
 
 if __name__ == "__main__":
