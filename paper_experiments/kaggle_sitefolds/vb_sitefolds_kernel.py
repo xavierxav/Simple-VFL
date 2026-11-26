@@ -33,7 +33,8 @@ def run(cmd, **kw):
     return subprocess.run(cmd, **kw)
 
 
-run(["git", "clone", "-q", "--depth", "1", "--branch", BR, "https://github.com/xavierxav/Simple-VFL.git", REPO])
+if not os.path.isdir(os.path.join(REPO, ".git")):
+    run(["git", "clone", "-q", "--depth", "1", "--branch", BR, "https://github.com/xavierxav/Simple-VFL.git", REPO])
 print(run(["git", "-C", REPO, "log", "--oneline", "-1"], capture_output=True, text=True).stdout, flush=True)
 run([sys.executable, "-m", "pip", "install", "-q", "py7zr"])
 run("nvidia-smi --query-gpu=name,memory.total --format=csv; free -g | head -2; df -h /tmp | tail -1", shell=True)
@@ -91,8 +92,11 @@ while any(q.poll() is None for q in procs):
     for lg in sorted(glob.glob(os.path.join(LOGS, "*.log"))):
         lines = open(lg, errors="ignore").read().strip().splitlines()
         print(f"[{time.time() - T0:.0f}s] {os.path.basename(lg)}: {lines[-1][:160] if lines else ''}", flush=True)
-print("exit codes", [q.returncode for q in procs], flush=True)
+codes = [q.returncode for q in procs]
+print("exit codes", codes, flush=True)
 r = subprocess.run([sys.executable, "-u", S26, "analysis", OUT], cwd=CWD, env=ENV, capture_output=True, text=True)
 open(os.path.join(LOGS, "analysis.log"), "w").write(r.stdout + r.stderr)
 print(r.stdout[-6000:], r.stderr[-3000:], flush=True)
-print(f"done in {time.time() - T0:.0f}s", flush=True)
+ok = all(c == 0 for c in codes) and r.returncode == 0
+print(("ALL DONE" if ok else "FAILED") + f" in {time.time() - T0:.0f}s", flush=True)
+sys.exit(0 if ok else 1)
