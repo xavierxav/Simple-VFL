@@ -226,7 +226,7 @@ def splitnn(fold_ids, epochs=50):
             if (ep + 1) % 10 == 0 or ep + 1 == epochs:
                 probs[f"ep{ep + 1}"] = p.astype(np.float32)
             print(f"fold {f} ep {ep + 1}/{epochs} loss {tot / len(tr):.4f} test acc {m['acc'] * 100:.2f} f1 {m['f1'] * 100:.2f} ({time.time() - t0:.0f}s)", flush=True)
-            out = {"fold": f, "seed": f, "n_train": int(len(tr)), "n_test": int(len(te)), "curve": curve, "gpu": torch.cuda.get_device_name(),
+            out = {"fold": f, "seed": f, "n_train": int(len(tr)), "n_test": int(len(te)), "curve": curve, "gpu": torch.cuda.get_device_name() if DEV.type == "cuda" else "cpu",
                    "recipe": "s8 SplitResNet: Adam 1e-5 wd 1e-5, StepLR(10,0.5), bs 32, x/255, no val, last epoch", "done": ep + 1 == epochs}
             save_json(f"vb_site_splitnn_f{f}.json", out)
             np.savez_compressed(path.replace(".json", "_probs.npz"), te=te, y=y[te], **probs)
