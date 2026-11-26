@@ -9,12 +9,15 @@ step() {
   python -u "$@" > $L/$n.log 2>&1
   local rc=$?
   echo "$(date +%H:%M:%S) end $n (exit $rc)"
+  [ $rc = 0 ] || FAIL=1
+  return $rc
 }
+FAIL=0
 pip uninstall -y -q torchao > /dev/null 2>&1  # peft refuses the old torchao of the image; LoRA does not need it
 pip install -q peft > /dev/null 2>&1
-step milk_prep s11_milk10k.py prepare
+step milk_prep s11_milk10k.py prepare || { echo CHAINM_FAILED; exit 1; }
 [ "$1" = prep ] && { echo CHAINM_PREP_DONE; exit 0; }
 step rounds_R10E1 s27_milk_rounds.py rounds --R 10 --E 1
 step rounds_split s27_milk_rounds.py split
 [ "$1" = noextra ] || step rounds_R4E3 s27_milk_rounds.py rounds --R 4 --E 3
-echo CHAINM_DONE
+[ $FAIL = 0 ] && echo CHAINM_DONE || { echo CHAINM_FAILED; exit 1; }

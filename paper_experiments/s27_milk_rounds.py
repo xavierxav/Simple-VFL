@@ -15,7 +15,8 @@ cycle schedule, peak lr 5e-4 for the LoRA weights and 1e-3 for the top, batch 64
            weighted loss with respect to its uploaded training embeddings (one message down), each party takes E epochs
            of LoRA steps on its own images with that fixed gradient (minibatch loss mean_i <g_i, f(aug(x_i))>, the
            first-order surrogate of the label owner's loss), then uploads the new embeddings of every lesion (one message
-           up).  Messages after r rounds: 1 + 2r.  After every upload the label owner scores (i) the warm top and (ii) a
+           up).  Messages after r rounds: 1 + 2r; bytes count the training and validation embeddings and the gradients
+           (the test embeddings, inference, are counted apart).  After every upload the label owner scores (i) the warm top and (ii) a
            fresh one-upload head (pe_common.train_head, mlp2, class weights, z-scored features, as stage 11) on validation
            and test; a protocol that stops after r rounds keeps the round with the lowest validation loss among 0..r.
            Schedules are one-cycle over the R*E epochs of the run, so each prefix r is a valid protocol with fewer
@@ -92,10 +93,15 @@ def resume(name):
 
 
 def flush(name, res, probs, npz):
-    save_json(f"{name}.json", res)
+    """Probabilities first (atomic rename), then the JSON that carries "done": a fold marked done always has its npz."""
     tmp = npz + ".tmp.npz"
     np.savez_compressed(tmp, **probs)
     os.replace(tmp, npz)
+    save_json(f"{name}.json", res)
+
+
+def finished(res, probs, f, keys):
+    return res.get(str(f), {}).get("done") and all(k in probs for k in keys)
 
 
 # ------------------------------------------------------------------ split learning with complete logs
@@ -104,10 +110,11 @@ def run_split(fold_ids):
     name = "milk_rounds_split"
     res, probs, npz = resume(name)
     for f in fold_ids:
-        if res.get(str(f), {}).get("done"):
+        if finished(res, probs, f, (f"f{f}_final", f"f{f}_te")):
             continue
         tr, va, te = Fo[f]
         seed_all(f)
+        torch.cuda.reset_peak_memory_stats() if DEV.type == "cuda" else None
         model = SplitModel([KIND, KIND], NCLS).to(DEV).to(memory_format=torch.channels_last)
         groups = [{"params": [p for p in b.parameters() if p.requires_grad], "lr": LR_LORA} for b in model.bottoms]
         groups.append({"params": model.top.parameters(), "lr": LR_TOP})
@@ -122,7 +129,8 @@ def run_split(fold_ids):
         log, best, best_state, step, msgs, nbytes, t0 = [], float("inf"), None, 0, 0, 0, time.time()
         run_loss, run_n = 0.0, 0
 
-        def evaluate(ep):
+        def evaluate(ep, eligible=True):
+            """eligible: an end of epoch, the only checkpoints stage 11 (pe_split.train_split) can select."""
             nonlocal msgs, nbytes, best, best_state
             model.eval()
             lv, lt = predict(model, parties, va), predict(model, parties, te)
@@ -135,10 +143,13 @@ def run_split(fold_ids):
                    **{f"test_{k}": v for k, v in ts.items()}, "messages": msgs, "bytes": nbytes, "secs": time.time() - t0}
             log.append(rec)
             probs[f"f{f}_step{step}"] = pt.astype(np.float32)
-            if vl < best:
+            rec["eligible"] = eligible
+            if eligible and vl < best:
                 best = vl
                 best_state = {k: v.detach().clone() for k, v in model.state_dict().items() if k in trainable or "running" in k or "num_batches" in k}
                 rec["best_so_far"] = True
+            res[str(f)] = {"log": log, "done": False}
+            flush(name, res, probs, npz)
             print(f"split f{f} ep {ep:.2f} step {step} val loss {vl:.4f} val F1 {vs['f1']:.2f} test F1 {ts['f1']:.2f} msgs {msgs} ({rec['secs']:.0f}s)", flush=True)
             model.train()
 
@@ -161,7 +172,7 @@ def run_split(fold_ids):
                 nbytes += 2 * len(idx) * d * EMB_BYTES
                 run_loss, run_n = run_loss + loss.item() * len(idx), run_n + len(idx)
                 if ep == 0 and step in (5, 10, 25):
-                    evaluate(step / spe)
+                    evaluate(step / spe, eligible=False)
                     run_loss, run_n = 0.0, 0
             evaluate(ep + 1)
             run_loss, run_n = 0.0, 0
@@ -170,7 +181,7 @@ def run_split(fold_ids):
         lt = predict(model, parties, te)
         fin, pt = scores(y, te, lt)
         probs[f"f{f}_final"] = pt.astype(np.float32)
-        best_rec = min(log, key=lambda r: r["val_loss"])
+        best_rec = min((r for r in log if r["eligible"]), key=lambda r: r["val_loss"])
         res[str(f)] = {"log": log, "final": fin, "final_from_step": best_rec["step"], "messages_total": msgs, "bytes_total": nbytes,
                        "steps_per_epoch": spe, "secs": time.time() - t0, "gpu": torch.cuda.get_device_name() if DEV.type == "cuda" else "cpu",
                        "peak_mem_gb": torch.cuda.max_memory_allocated() / 1e9 if DEV.type == "cuda" else 0.0, "done": True}
@@ -187,12 +198,14 @@ def run_rounds(fold_ids, R, E):
     name = f"milk_rounds_R{R}E{E}"
     res, probs, npz = resume(name)
     yt = torch.as_tensor(y, device=DEV)
+    assert R >= 1 and E >= 1, "round 0 (the one upload) is part of every run"
     for f in fold_ids:
-        if res.get(str(f), {}).get("done"):
+        if finished(res, probs, f, (f"f{f}_te", f"f{f}_r{R}_fresh")):
             continue
         tr, va, te = Fo[f]
         allx = np.arange(len(y))
         seed_all(f)
+        torch.cuda.reset_peak_memory_stats() if DEV.type == "cuda" else None
         model = SplitModel([KIND, KIND], NCLS).to(DEV).to(memory_format=torch.channels_last)
         bottoms, top = model.bottoms, model.top
         spe = n_steps(len(tr))
@@ -204,17 +217,18 @@ def run_rounds(fold_ids, R, E):
         w = torch.tensor(cw, dtype=torch.float32, device=DEV)
         g = torch.Generator().manual_seed(f)
         dims = [b.dim for b in bottoms]
-        log, msgs, nbytes, t0 = [], 0, 0, time.time()
+        log, msgs, nbytes, nbytes_test, t0 = [], 0, 0, 0, time.time()
 
-        def upload(r):
-            nonlocal msgs, nbytes
+        def upload(r, extra=None):
+            nonlocal msgs, nbytes, nbytes_test
             H = torch.cat([embed(b, P, allx) for b, P in zip(bottoms, parties)], 1)  # [N, 1536]
-            msgs += 1
-            nbytes += len(allx) * sum(dims) * EMB_BYTES
+            msgs += 1  # training and validation embeddings (test embeddings travel with them; counted apart, inference)
+            nbytes += (len(tr) + len(va)) * sum(dims) * EMB_BYTES
+            nbytes_test += len(te) * sum(dims) * EMB_BYTES
             top.eval()
             with torch.no_grad():
                 lv, lt = top(H[va]), top(H[te])
-            rec = {"round": r, "messages": msgs, "bytes": nbytes, "secs": time.time() - t0}
+            rec = {"round": r, "messages": msgs, "bytes": nbytes, "bytes_test_inference": nbytes_test, "secs_uploaded": time.time() - t0, **(extra or {})}
             if r > 0:  # the warm top (trained in the rounds); round 0 has none yet
                 vs, _ = scores(y, va, lv)
                 ts, pt = scores(y, te, lt)
@@ -230,6 +244,7 @@ def run_rounds(fold_ids, R, E):
             rec.update({"fresh_val_loss": F.nll_loss(torch.log(pv.clamp_min(1e-12)), yt[va]).item(), "fresh_epochs": m.epochs_run,
                         **{f"fresh_val_{k}": v for k, v in vs.items()}, **{f"fresh_test_{k}": v for k, v in ts.items()}})
             probs[f"f{f}_r{r}_fresh"] = pt.cpu().numpy().astype(np.float32)
+            rec["secs"] = time.time() - t0  # scores available
             log.append(rec)
             print(f"R{R}E{E} f{f} round {r}: fresh val F1 {vs['f1']:.2f} test F1 {ts['f1']:.2f}" +
                   (f" | warm test F1 {rec['warm_test_f1']:.2f}" if r > 0 else "") + f" msgs {msgs} ({rec['secs']:.0f}s)", flush=True)
@@ -287,14 +302,14 @@ def run_rounds(fold_ids, R, E):
                         sch_p[k].step()
                         lsum += loss.item()
                 pl.append(lsum)
-            H = upload(r)
-            log[-1].update({"top_train_loss": tl / (E * len(tr)), "party_surrogate_sum": pl, "grad_rms": float(G.pow(2).mean().sqrt())})
+            H = upload(r, {"top_train_loss": tl / (E * len(tr)), "party_surrogate_sum": pl, "grad_rms": float(G.pow(2).mean().sqrt())})
         # protocols that stop after r rounds: best round <= r on the validation loss of the fresh head
         sel = []
         for r in range(R + 1):
             b = min(log[: r + 1], key=lambda q: q["fresh_val_loss"])
             sel.append({"rounds": r, "messages": 1 + 2 * r, "selected_round": b["round"], **{k[6:]: v for k, v in b.items() if k.startswith("fresh_test_")}})
-        res[str(f)] = {"log": log, "stop_after_r": sel, "R": R, "E": E, "messages_total": msgs, "bytes_total": nbytes, "secs": time.time() - t0,
+        res[str(f)] = {"log": log, "stop_after_r": sel, "R": R, "E": E, "messages_total": msgs, "bytes_total": nbytes, "bytes_test_inference": nbytes_test,
+                       "secs": time.time() - t0,
                        "gpu": torch.cuda.get_device_name() if DEV.type == "cuda" else "cpu",
                        "peak_mem_gb": torch.cuda.max_memory_allocated() / 1e9 if DEV.type == "cuda" else 0.0, "done": True}
         probs[f"f{f}_te"] = te
