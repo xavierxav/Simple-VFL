@@ -1015,6 +1015,7 @@ for bench, t in ((VB, "Vb"), (MK, "Milk")):
     macro(f"{t}BestOneShotName", tex(bo["name"]))
     macro(f"{t}BestOneShot", f"{bo['metric_mean']:.1f}")
     macro(f"{t}BestOneShotBytes", size(bo["bytes_per_sample"]))
+    macro(f"{t}OneShotOverNonFound", f"{bo['metric_mean'] - nf['metric_mean']:.0f}")  # points, abstract (MILK10k: vs ImageNet ResNet-18 split)
     ch = min((p for p in pts if p["metric_mean"] >= bo["metric_mean"] - 1.0), key=lambda p: (p["bytes_per_sample"], -p["metric_mean"]))
     macro(f"{t}CheapName", tex(ch["name"]))
     macro(f"{t}Cheap", f"{ch['metric_mean']:.1f}")
