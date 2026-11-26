@@ -882,6 +882,64 @@ def axes_figure(bench, yl, yl_exp, one_y, fname):
 axes_figure(VB, YL[VB], (50.0, 88.5), 80.75, "fig_frontier_axes")
 axes_figure(MK, YL[MK], (38.0, 65.5), 59.0, "fig_frontier_axes_milk")
 
+
+def axes_figure_both(rows, fname):
+    """Main-text figure: the three non-byte axes (messages, party compute, exposure; bytes are in fig_frontier), one row per benchmark.
+    rows: (bench, y-range, y-range of the exposure panel, height of the "one upload" pointer)."""
+    H = 4.7
+    fig, axs = plt.subplots(len(rows), 3, figsize=(4.8, H), gridspec_kw=dict(width_ratios=(1, 1, 1.55)))
+    foot = []
+    for r, (bench, yl, yl_exp, one_y) in enumerate(rows):
+        pts = [p for p in P if p["benchmark"] == bench and p["in_pareto_set"]]
+        for c, axis in enumerate(("rounds", "gflops", "exposure")):
+            ax = axs[r, c]
+            below, nox = frontier_panel(ax, bench, axis, yl_exp if axis == "exposure" else yl)
+            letter = "abcdef"[3 * r + c]
+            ax.set_title(f"({letter}) " + ("messages", "party compute", "what the server sees")[c], fontsize=6.5, loc="left")
+            ax.set_xlabel(("sequential messages", "party GFLOPs per image",
+                           "most exposed  →  least exposed")[c] if r == len(rows) - 1 else "", fontsize=5.8)
+            ax.tick_params(labelsize=5.6)
+            if axis == "exposure":
+                ax.set_xticklabels(["act. +\ngrad.", "plain", "PCA /\nquant.", "logits", "DP\n$\\varepsilon$=64", "DP\n$\\varepsilon$=8",
+                                    "DP\n$\\varepsilon$=1", "CKKS"])
+                ax.tick_params(axis="x", labelsize=4.6, pad=1.5)
+            if below:
+                foot.append(f"({letter}) {len(below)} points below the y-range ({min(p['metric_mean'] for p in below):.0f}–"
+                            f"{max(p['metric_mean'] for p in below):.0f} %)")
+            if nox:
+                foot.append(f"({letter}) no FLOPs recorded: " + ", ".join(p["name"].split(",")[0] for p in nox))
+            if axis == "rounds":
+                ax.annotate("one upload", (1, one_y), xytext=(14, one_y), textcoords="data", va="center", fontsize=5.2, style="italic",
+                            color="#333333", arrowprops=dict(arrowstyle="-|>", lw=0.5, color="#444444", shrinkA=1, shrinkB=4, mutation_scale=5))
+            if axis == "exposure":
+                for k in range(len(EXPO)):
+                    if not any(p["exposure_rank"] == k for p in pts):
+                        ax.text(k, yl_exp[0] + 0.04 * (yl_exp[1] - yl_exp[0]), "not\nrun", ha="center", va="bottom", fontsize=4.4,
+                                color="#888888", style="italic")
+                if any(p["fam"] == "fm_dp" for p in pts):
+                    ax.text(0.02, 0.03, "DP columns, left to right:\nPCA-16, PCA-64, full dim.", transform=ax.transAxes, ha="left",
+                            va="bottom", **NOTE)
+        axs[r, 0].set_ylabel(bench.replace(" Satellite", "") + "\n" + ("accuracy (%)" if bench == VB else "macro F1 (%)"), fontsize=6.5)
+        for c in (1, 2):
+            axs[r, c].set_ylabel("")
+    merged = {}
+    for f in foot:
+        merged.setdefault(f[4:], []).append(f[1])
+    foot = [", ".join(f"({k})" for k in ks) + " " + t for t, ks in merged.items()]
+    fig.text(0.01, 0.80 / H, "; ".join(foot), ha="left", va="bottom", **NOTE)
+    fig.legend(handles=H1, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 0.41 / H), title="foundation model (filled markers)", **kw)
+    fig.legend(handles=H2, ncol=3, loc="lower left", bbox_to_anchor=(0.0, 0.0), title="no foundation model (hollow markers)", **kw)
+    fig.tight_layout(rect=(0, 0.95 / H, 1, 1), w_pad=0.6, h_pad=0.5)
+    fig.savefig(os.path.join(OUT, fname + ".pdf"), metadata={"CreationDate": None})
+    fig.savefig(os.path.join(OUT, fname + ".png"), dpi=220)
+    plt.close(fig)
+    for p in P:
+        p.pop("_x", None)
+    print(f"wrote {fname}.pdf, {fname}.png")
+
+
+axes_figure_both([(VB, YL[VB], (50.0, 88.5), 80.75), (MK, YL[MK], (38.0, 65.5), 59.0)], "fig_frontier_axes_both")
+
 # ------------------------------------------------------------------ tab_summary.tex: one row per approach, both benchmarks (main text)
 def pt(bench, name):
     q = [p for p in P if p["benchmark"] == bench and p["name"] == name]
