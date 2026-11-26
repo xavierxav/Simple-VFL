@@ -339,9 +339,65 @@ def run_rounds(fold_ids, R, E, local="target", shrink=0.5):
         torch.cuda.empty_cache() if DEV.type == "cuda" else None
 
 
+# ------------------------------------------------------------------ analysis (CPU, local)
+def analysis(rdir):
+    """F1 versus sequential messages: split learning (end of every epoch; final = validation-selected checkpoint) and
+    every rounds run (stop after r rounds, validation-selected round <= r); paired per-fold differences against the
+    one upload (round 0 of the same run) and against the final split-learning checkpoint."""
+    import glob
+
+    out = {}
+    sp = json.load(open(os.path.join(rdir, "milk_rounds_split.json")))
+    folds_ = sorted(int(f) for f, v in sp.items() if v.get("done"))
+    fin = np.array([sp[str(f)]["final"]["f1"] for f in folds_])
+    curve = []
+    for e in range(1, EPOCHS + 1):
+        recs = [next(r for r in sp[str(f)]["log"] if r["eligible"] and r["epoch"] == e) for f in folds_]
+        curve.append({"epoch": e, "messages": recs[0]["messages"], "test_f1": float(np.mean([r["test_f1"] for r in recs])),
+                      "test_f1_last_checkpoint_not_selected": True})
+    early = []
+    for st in (5, 10, 25):
+        recs = [r for f in folds_ for r in sp[str(f)]["log"] if r["step"] == st and not r["eligible"]]
+        if len(recs) == len(folds_):
+            early.append({"step": st, "messages": recs[0]["messages"], "test_f1": float(np.mean([r["test_f1"] for r in recs]))})
+    out["split"] = {"folds": folds_, "final_f1": float(fin.mean()), "final_f1_folds": fin.tolist(), "curve_end_of_epoch": curve, "early_steps": early,
+                    "messages_total": sp[str(folds_[0])]["messages_total"]}
+    for path in sorted(glob.glob(os.path.join(rdir, "milk_rounds_*R*E*.json"))):
+        name = os.path.basename(path)[len("milk_rounds_"):-5]
+        js = json.load(open(path))
+        fs = sorted(int(f) for f, v in js.items() if v.get("done"))
+        if not fs:
+            out[name] = {"folds": [], "note": "no finished fold"}
+            continue
+        R = js[str(fs[0])]["R"]
+        rows = []
+        for r in range(R + 1):
+            f1 = np.array([js[str(f)]["stop_after_r"][r]["test_f1"] for f in fs])
+            base = np.array([js[str(f)]["stop_after_r"][0]["test_f1"] for f in fs])
+            row = {"rounds": r, "messages": 1 + 2 * r, "test_f1": float(f1.mean()), "test_f1_folds": f1.tolist(),
+                   "gain_over_one_upload": float((f1 - base).mean()), "gain_over_one_upload_std": float((f1 - base).std(ddof=1)) if len(fs) > 1 else 0.0,
+                   "selected_rounds": [js[str(f)]["stop_after_r"][r]["selected_round"] for f in fs]}
+            common = [i for i, f in enumerate(fs) if f in folds_]
+            if common:
+                d = f1[common] - np.array([sp[str(fs[i])]["final"]["f1"] for i in common])
+                row.update({"minus_split_final": float(d.mean()), "minus_split_final_folds": d.tolist(), "n_paired_with_split": len(common)})
+            rows.append(row)
+        last = [js[str(f)]["log"][-1] for f in fs]
+        out[name] = {"folds": fs, "R": R, "E": js[str(fs[0])]["E"], "stop_after_r": rows,
+                     "fresh_test_f1_last_round": float(np.mean([q["fresh_test_f1"] for q in last])),
+                     "warm_test_f1_last_round": float(np.mean([q.get("warm_test_f1", np.nan) for q in last]))}
+    json.dump(out, open(os.path.join(rdir, "milk_rounds_analysis.json"), "w"), indent=1)
+    print(f"split learning: final {out['split']['final_f1']:.2f} F1 after {out['split']['messages_total']} messages; per epoch:",
+          " ".join(f"{c['messages']}:{c['test_f1']:.1f}" for c in curve))
+    for k, v in out.items():
+        if k != "split" and v.get("folds"):
+            print(k, " ".join(f"r{q['rounds']}({q['messages']} msg):{q['test_f1']:.1f}" for q in v["stop_after_r"]))
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["split", "rounds"])
+    ap.add_argument("mode", choices=["split", "rounds", "analysis"])
+    ap.add_argument("rdir", nargs="?", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "paper_results"))
     ap.add_argument("--folds", default="0,1,2,3,4")
     ap.add_argument("--R", type=int, default=10)
     ap.add_argument("--E", type=int, default=1)
@@ -349,7 +405,12 @@ def main():
     ap.add_argument("--shrink", type=float, default=0.5)
     a = ap.parse_args()
     fo = [int(x) for x in a.folds.split(",")]
-    run_split(fo) if a.mode == "split" else run_rounds(fo, a.R, a.E, a.local, a.shrink)
+    if a.mode == "analysis":
+        analysis(a.rdir)
+    elif a.mode == "split":
+        run_split(fo)
+    else:
+        run_rounds(fo, a.R, a.E, a.local, a.shrink)
 
 
 if __name__ == "__main__":
